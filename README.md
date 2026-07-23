@@ -400,7 +400,7 @@ No formal software citation or DOI is defined in the supplied source files. For 
 Suggested citation format:
 
 ```text
-Ivan KHimach. 2026. Cell Quant Studio (Version 1.0.0)
+Ivan Khimach. 2026. Cell Quant Studio (Version 1.0.0)
 ```
 
 ## License
