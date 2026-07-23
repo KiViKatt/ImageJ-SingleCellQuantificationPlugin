@@ -1,1 +1,1 @@
-# ImageJ-Plugin-
+# ImageJ-SingleCellQuantificationPlugin
