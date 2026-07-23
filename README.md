@@ -395,17 +395,11 @@ Avoid committing proprietary or identifiable microscopy data to a public reposit
 
 ## Citation
 
-No formal software citation or DOI is defined in the supplied source files. For publication use, create a versioned GitHub release and archive it with a service such as Zenodo, then add the resulting citation and DOI here.
-
 Suggested citation format:
 
 ```text
 Ivan Khimach. 2026. Cell Quant Studio (Version 1.0.0)
 ```
-
-## License
-
-No software license is specified in the supplied source files. Add a `LICENSE` file and update this section before public distribution.
 
 ## Acknowledgments
 
