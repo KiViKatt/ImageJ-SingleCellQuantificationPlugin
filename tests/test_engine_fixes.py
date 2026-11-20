@@ -196,6 +196,44 @@ def test_fix_sensitivity_empty_range(E, t, tmp):
     imp.close()
 
 
+def test_fix_sensitivity_java_error(E, t, tmp):
+    """An error raised inside ImageJ or a plugin (a Java error) for one
+    factor is noted for that factor and the sweep goes on. Before the fix:
+    only Python errors were caught, so the whole sweep stopped. A cancel
+    still stops it."""
+    from java.lang import IllegalStateException
+
+    class FailingEngine(E.AnalysisEngine):
+        failure = None
+
+        def build_masks(self, prepared_imp, config, title_prefix):
+            if config["manual_low"] > 1500:
+                raise self.failure
+            return E.AnalysisEngine.build_masks(self, prepared_imp, config, title_prefix)
+
+    imp = ImagePlus("sens java", nuclei_plane(DISKS))
+    config = nuclei_config(E)
+    engine = FailingEngine()
+    engine.failure = IllegalStateException("plugin failure")
+    result = E.run_sensitivity(engine, imp, config, [E.whole_image_roi(imp)], E.SENS_THRESHOLD,
+                               [1.0, 1.2, 1.8], E.unique_dir(tmp, "fix_sensitivity_java"), "sens.tif", 1)
+    rows = dict([(row["Factor"], row) for row in result["rows"]])
+    t.equal(sorted(rows.keys()), [1.0, 1.2, 1.8], "every factor has a row")
+    t.check("plugin failure" in E_TEXT(rows[1.8]["Note"]), "the failed factor carries the error as its note")
+    t.equal(rows[1.2]["Object_Count"], len(DISKS), "the factors after and before it are still measured")
+    t.equal(rows[1.2]["Note"], "", "a working factor has no note")
+
+    engine.failure = E.AnalysisCancelled("Cancelled by user.")
+    cancelled = False
+    try:
+        E.run_sensitivity(engine, imp, config, [E.whole_image_roi(imp)], E.SENS_THRESHOLD,
+                          [1.0, 1.8], E.unique_dir(tmp, "fix_sensitivity_cancel"), "sens.tif", 1)
+    except E.AnalysisCancelled:
+        cancelled = True
+    t.check(cancelled, "a cancel still ends the sweep")
+    imp.close()
+
+
 # -----------------------------------------------------------------------------
 # B. Images with a calibration function are refused for segmentation
 # -----------------------------------------------------------------------------
@@ -1208,6 +1246,7 @@ def test_fix_positive_fraction_own_area(E, t, tmp):
 
 TESTS.append(("engine fix: an empty threshold range gives zero, not an error", test_fix_empty_threshold_range))
 TESTS.append(("engine fix: sensitivity factor above every pixel gives zero with a note", test_fix_sensitivity_empty_range))
+TESTS.append(("engine fix: a Java error in one sensitivity factor is noted, not fatal", test_fix_sensitivity_java_error))
 TESTS.append(("engine fix: images with a calibration function are refused for segmentation", test_fix_calibration_function_refused))
 TESTS.append(("engine fix: per-object intensity of a ring and the object in its hole", test_fix_object_intensity_ring))
 TESTS.append(("engine fix: per-object intensity bit-identical without holes", test_fix_object_intensity_bit_identical))

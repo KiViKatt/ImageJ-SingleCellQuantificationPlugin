@@ -925,6 +925,20 @@ def step_display_minimum(ctx, t):
     click(ctx, "3. Run analysis")
     expect_dialogs(ctx, t, [("error", "Display-minimum thresholding requires the current prepared images")],
                    "display minimum with stale prepared images")
+    # Validation, sensitivity and the capture button must not rebuild the
+    # prepared image either: its display range would be a default one.
+    on_edt(lambda: app.qc_channel_combo.setSelectedIndex(1), "choosing the validated channel")
+    click(ctx, "Run sensitivity analysis")
+    expect_dialogs(ctx, t, [("error", "Display-minimum thresholding requires the current prepared images")],
+                   "sensitivity on a display-minimum channel with stale prepared images")
+    click(ctx, "Run validation")
+    expect_dialogs(ctx, t, [("error", "Display-minimum thresholding requires the current prepared images")],
+                   "validation of a display-minimum channel with stale prepared images")
+    click(ctx, "Capture display minimum", container=app.channel_panels[1])
+    expect_dialogs(ctx, t, [("error", "There is no current prepared image to capture from")],
+                   "capturing with stale prepared images")
+    t.equal(app.channel_panels[1].get_config()["threshold_mode"], "Display minimum",
+            "a refused capture leaves the threshold mode alone")
     set_widgets(app.channel_panels[0], {"gaussian_sigma": 0})
 
     click(ctx, "1. Prepare enabled channels")
@@ -2202,6 +2216,44 @@ def step_relaunch(ctx, t):
     expect_dialogs(ctx, t, [], "relaunch")
 
 
+def step_fewer_channels(ctx, t):
+    """An image with fewer channels must not erase the settings of the
+    channels it lacks."""
+    launch = ctx.ns["launch_cell_quant_studio"]
+    app = on_edt(launch, "opening a window", 60.0)
+    settle(ctx)
+    ctx.app = app
+    three = make_image("smoke three channels.tif")
+    single = ImagePlus("smoke one channel.tif", nuclei_plane(DISKS))
+    try:
+        use_as_source(ctx, three)
+        set_widgets(app.channel_panels[1], C2_VALUES)
+        set_widgets(app.channel_panels[2], {"enabled": True, "name": "Third", "analysis_mode": "Intensity only"})
+        use_as_source(ctx, single)
+        t.equal([app.channel_tabs.isEnabledAt(i) for i in range(3)], [True, False, False],
+                "the tabs of missing channels are disabled")
+        second = app.channel_panels[1].get_config()
+        third = app.channel_panels[2].get_config()
+        t.equal((second["enabled"], second["name"], second["analysis_mode"], second["manual_low"]),
+                (True, "MAP2", "Positive area", 800.0), "C2 keeps its settings behind a one-channel image")
+        t.equal((third["enabled"], third["name"], third["analysis_mode"]), (True, "Third", "Intensity only"),
+                "C3 keeps its settings behind a one-channel image")
+        t.check(max([0] + [config["channel"] for config in app.collect_channel_configs()]) <= 1,
+                "only the channels of the open image are analyzed")
+        folder_channels = [config["channel"] for config in app.collect_channel_configs(limit_to_source=False)]
+        t.check(2 in folder_channels and 3 in folder_channels, "a folder job still uses every enabled channel")
+        use_as_source(ctx, three)
+        back = [config["channel"] for config in app.collect_channel_configs()]
+        t.check(2 in back and 3 in back, "the channels are used again with the next three-channel image")
+        expect_dialogs(ctx, t, [], "switching between images")
+    finally:
+        for imp in [three, single]:
+            imp.changes = False
+            on_edt(imp.close, "closing a test image")
+        on_edt(app.dispose, "closing the window")
+        settle(ctx)
+
+
 def step_source_rules(ctx, t):
     for name in ["cellquantcore.py", "Cell_Quant_Studio_final.py"]:
         handle = open(os.path.join(ctx.repo, name), "rb")
@@ -2244,6 +2296,7 @@ STEPS = [
     ("robustness over a grid of settings, cancel, refusal", step_robustness),
     ("ROI, cleanup, and reset actions", step_other_actions),
     ("close and relaunch", step_relaunch),
+    ("an image with fewer channels keeps the other channels' settings", step_fewer_channels),
     ("source rules", step_source_rules)
 ]
 

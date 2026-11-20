@@ -2,7 +2,7 @@
 
 ## 2.3.0 (2026-11-19)
 
-Nothing was removed. Profiles saved by 2.2.x load unchanged, and every table keeps its 2.2 columns in the same order; new columns are added after them. This release was run and tested in a real Fiji (Jython 2.7.4, ImageJ 1.54p, Java 21): 123 automated engine and module tests, a 28-step automated window test, and comparisons with a 2.2 run on the author's Zeiss CZI images.
+Nothing was removed. Profiles saved by 2.2.x load unchanged, and every table keeps its 2.2 columns in the same order; new columns are added after them. This release was run and tested in a real Fiji (Jython 2.7.4, ImageJ 1.54p, Java 21): 125 automated engine and module tests, a 29-step automated window test, and comparisons with a 2.2 run on the author's Zeiss CZI images.
 
 ### Results that change compared with 2.2.x
 
@@ -63,6 +63,10 @@ Read this section before comparing new numbers with old ones.
 
 ### Fixed
 
+- **Channel settings erased by an image with fewer channels.** Opening a 1- to 3-channel image, or clicking "Use active image" on a prepared window, switched off every higher channel and set it to Ignore. The settings did not come back with the next 4-channel image, and a profile saved afterwards stored the erased values. The tabs of missing channels are still greyed out, but their settings are kept and are simply not used for that image. Folder jobs (batch, tuning, robustness) use every enabled channel whatever image is open.
+- **Validation, sensitivity and "Capture display minimum" with a Display-minimum threshold.** When the prepared image was missing or out of date, these rebuilt it and used its default display range instead of the minimum chosen in Brightness/Contrast, without any warning. They now stop with the same message as "Run analysis".
+- **A sensitivity or tuning sweep stopped by one ImageJ error.** An error raised inside ImageJ or a plugin for one factor or one combination of settings ended the whole sweep, because only Python errors were caught there. It is now noted for that factor or combination, like any other failure, and the sweep goes on. Cancelling still stops it.
+- **Blended pixels around the label of the tissue check image on macOS.** macOS always smooths text, which left pixels between yellow and gray around the letters. The label is now drawn in plain yellow on every system. On Windows the picture is unchanged.
 - **ROI Manager disconnected after an analysis.** Hidden ROI Manager objects were closed after each run, so ImageJ lost the visible manager. The next run reported "ROI Manager contains no parent ROIs". Objects are now found without any ROI Manager.
 - **A measurement redirect set in Analyze > Set Measurements** could stop object detection; it is now saved, cleared and restored around each analysis.
 - **Non-ASCII text.** A micrometer sign or an accented file or channel name could stop loading or export. Text handling is now Unicode-safe and tables are UTF-8.

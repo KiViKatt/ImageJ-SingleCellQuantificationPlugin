@@ -800,7 +800,11 @@ def tune_score_field(engine, work, combos, fast_sizes=True, tick=None):
                 variant = combos[mask_group[1][0]]["config"]
                 try:
                     mask_data = engine.build_masks(prepared, variant, "CellQuant_tuning")
-                except (ValueError, RuntimeError) as exc:
+                except ANY_ERROR as exc:
+                    # ANY_ERROR: an error raised inside ImageJ or a plugin is
+                    # a Java error, and is reported for this combination too.
+                    if isinstance(exc, AnalysisCancelled):
+                        raise
                     if TUNE_EMPTY_RANGE_TEXT in to_text(exc):
                         # No pixel value of this field lies in the threshold
                         # range (for example a threshold above the brightest

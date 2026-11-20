@@ -3871,8 +3871,10 @@ def run_sensitivity(engine, prepared_imp, config, parent_rois, parameter, factor
             value, variant = sensitivity_variant(config, parameter, factor, baseline)
             values[factor] = value
             mask_data = engine.build_masks(prepared_imp, variant, prefix)
-        except (ValueError, RuntimeError) as exc:
-            if factor == 1.0:
+        except ANY_ERROR as exc:
+            # ANY_ERROR: an error raised inside ImageJ or a plugin is a Java
+            # error, and must be noted for this factor like any other.
+            if factor == 1.0 or isinstance(exc, AnalysisCancelled):
                 raise
             notes[factor] = to_text(exc)
             engine.log("Sensitivity factor " + str(factor) + " skipped: " + to_text(exc))
