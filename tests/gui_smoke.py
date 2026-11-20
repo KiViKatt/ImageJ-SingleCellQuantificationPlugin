@@ -867,7 +867,20 @@ def step_run_analysis(ctx, t):
     density = [float(row.get("C1_DAPI_Object_Density_Per_mm2")) for row in window["summary"][1]]
     t.equal(shown["metrics"][1]["values"], density, "the density of each region is the one in the summary table")
     t.equal(shown["labels"], [row.get("Parent_ROI_Name") for row in window["summary"][1]], "the regions are named as in the table")
-    t.equal(len(shape["pills"]), 4, "one name per choice above the map")
+    t.equal(len(shape["pills"]), 4, "one row per choice on the left")
+    widths = [ring[1] for ring in shape["rings"]]
+    t.check(min(widths) >= 20 and radii[0] - radii[1] >= 2 * widths[0], "the rings are wide, with air between them")
+    t.check(shape["picture"] <= 0.4 * shape["outer"], "the picture is the small core of the map")
+    run = shape["run"]
+    pressed = []
+    kept = canvas.on_run
+    canvas.on_run = lambda: pressed.append(True)
+    on_edt(lambda: canvas.click_at(run[0] + run[2] / 2.0, run[1] + run[3] / 2.0), "pressing Analyse on the map")
+    canvas.on_run = kept
+    t.equal(len(pressed), 1, "the Analyse button of the map starts an analysis")
+    t.check(kept is not None, "and it is wired to the window")
+    last_pill = shape["pills"][-1]
+    t.check(last_pill[1] + last_pill[3] < run[1], "the choices sit above the button, without overlap")
     for pill_index in [2, 0]:
         pill = canvas.geometry()["pills"][pill_index]
         on_edt(lambda: canvas.click_at(pill[0] + pill[2] / 2.0, pill[1] + pill[3] / 2.0), "choosing what the rings show")

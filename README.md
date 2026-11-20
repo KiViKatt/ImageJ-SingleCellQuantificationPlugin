@@ -24,10 +24,9 @@ Built-in tools check the results: object counts against manual point marks, mask
 ## Look and Results tab
 
 - **Results tab: the organoid map.** After "3. Run analysis" the window shows the run as one picture.
-  - **In the middle**, in a round window: all channels merged in their own colors, every detected object outlined. A click on it shows the whole picture, uncropped, with the parent ROIs named; another click goes back.
-  - **Around it**, one ring per parent ROI (the first eight). The arc of a ring is that region's value as a share of the largest one. The names above the map choose the value: object count, object density per mm², or positive-area share, for every channel that has it.
-  - **On the left**, the headline figures: counts added up over the parent ROIs with the overall density, and positive-area shares (positive area of all ROIs divided by their area).
-  - **On the right**, the regions: the chosen value in large figures, the other values and the ROI area under the name.
+  - **In the middle**, wide rings, one per parent ROI (the first eight), from the outside in. The arc of a ring is that region's value as a share of the largest one. At their center, in a small round window, is the picture of the run: all channels merged in their own colors, every detected object outlined. A click on it shows the whole picture, uncropped, with the parent ROIs named; another click goes back.
+  - **On the left**, the headline figures (counts added up over the parent ROIs with the overall density; positive-area shares as positive area of all ROIs over their area), the list **Rings show** that chooses the value of the rings (object count, object density per mm², or positive-area share, for every channel that has it), and the **Analyse** button, which runs the analysis like "3. Run analysis".
+  - **On the right**, the regions: the chosen value in large figures, the other values and the ROI area under the name; below them, what can be pointed at and clicked.
   - Pointing at a ring or at a region lights it up and outlines that region on the picture.
   - Nothing new is measured or written: every number comes from `roi_summary.csv`, which remains the record.
 
