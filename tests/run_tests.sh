@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Ivan Khimach
+# Copyright (C) 2026 Maksym Taran
 # Cell Quant Studio Universal - run Jython scripts against a Fiji installation
 # from a terminal (Linux, macOS, or Git Bash on Windows).
 #
