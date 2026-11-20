@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Ivan Khimach
+
 # Cell Quant Studio Universal - end-to-end test of the application window
 #
 # What this checks: the window (cellquantcore.py), started the way a user

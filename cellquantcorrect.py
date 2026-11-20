@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Ivan Khimach
+
 # Cell Quant Studio Universal - error-corrected object counts
 #
 # Automated counts are biased: touching nuclei that are detected as one object

@@ -7,6 +7,9 @@
 #@ Boolean (label="Always open with Bio-Formats", value=false) force_bioformats
 #@ Boolean (label="Analyze every series of a multi-series file", value=false) all_series
 
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Ivan Khimach
+
 # Cell Quant Studio Universal - batch without the window
 #
 # Analyzes every image of a folder with a settings profile saved from the

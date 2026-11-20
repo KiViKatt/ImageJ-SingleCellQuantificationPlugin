@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Ivan Khimach
+
 # Cell Quant Studio Universal - command-line runner for Jython scripts
 #
 # Runs one or more Jython scripts with Fiji's classes on the class path and
