@@ -5,7 +5,7 @@ A working note for the maintainer. Delete it once the steps are done.
 ## What has been tested (2026-11-19)
 
 - In the real Fiji on the development PC (Jython 2.7.4, ImageJ 1.54p, Java 21):
-  - 123 engine and module tests, 4296 checks, all pass;
+  - 125 engine and module tests, about 4300 checks, all pass;
   - the 29-step automated window test passes.
 - On macOS (Apple silicon, same Fiji versions): both automated tests pass. No real image was used there.
 - On the author's Zeiss CZI files (read-only):

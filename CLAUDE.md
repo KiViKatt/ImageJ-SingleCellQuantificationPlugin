@@ -22,9 +22,9 @@ Version 2.3.0 has been run and tested in the owner's real Fiji: Jython 2.7.4, Im
 
 **Automated tests:**
 
-- `tests/run_tests.py`: 123 tests, 4296 checks, all pass.
+- `tests/run_tests.py`: 125 tests, about 4300 checks, all pass.
 - `tests/gui_smoke.py`: 29 window steps, all pass.
-- Both also pass on macOS (Apple silicon, the same Fiji versions; 4294 checks there), run on 2026-11-19. No real image was used on macOS.
+- Both also pass on macOS (Apple silicon, the same Fiji versions; 4302 checks there), run on 2026-11-19. No real image was used on macOS.
 - `tools/test_cellquant_figures.py`: 6 tests, all pass.
 
 **Real data (the owner's Zeiss Airyscan CZI files, 4 channels x 4 Z, 4084 x 4084, 16-bit, 0.2076 micron per pixel; read-only, unpublished):**
