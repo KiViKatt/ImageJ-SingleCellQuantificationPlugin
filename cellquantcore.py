@@ -538,8 +538,9 @@ class ChannelSettingsPanel(JPanel):
 # right) leaves Fiji alone; the choice is remembered.
 
 LOOK_DARK = "Dark"
+LOOK_LIGHT = "Light"
 LOOK_FIJI = "Fiji default"
-LOOK_NAMES = [LOOK_DARK, LOOK_FIJI]
+LOOK_NAMES = [LOOK_DARK, LOOK_LIGHT, LOOK_FIJI]
 LOOK_PREF_KEY = "cellquant.look"
 LOOK_STATE = {"active": False, "name": None, "previous": None, "extras": None}
 LOOK_FONTS = {"loaded": False}
@@ -548,57 +549,123 @@ LOOK_FONT_FILES = [
     ("figure", "ChakraPetch-SemiBold.ttf"), ("figure_light", "ChakraPetch-Medium.ttf"), ("title", "ChakraPetch-Bold.ttf")
 ]
 LOOK_UI_FAMILY = "IBM Plex Sans"
-# The palette.
-LOOK_DEEP = Color(6, 18, 31)
-LOOK_PANEL = Color(11, 34, 51)
-LOOK_LINE = Color(22, 54, 77)
-LOOK_TEXT = Color(221, 243, 245)
-LOOK_FAINT = Color(127, 163, 181)
-LOOK_ACCENT = Color(94, 242, 224)
-LOOK_ACCENT_HEX = "#5ef2e0"
-LOOK_CORAL = Color(255, 122, 107)
-LOOK_VIOLET = Color(155, 140, 255)
-LOOK_EXTRAS = [
-    ("@background", "#081a29"),
-    ("@foreground", "#ddf3f5"),
-    ("@accentColor", LOOK_ACCENT_HEX),
-    ("Label.disabledForeground", "#7fa3b5"),
-    ("Component.borderColor", "#1b4460"),
+# What both looks share: the shapes.
+LOOK_SHAPE_EXTRAS = [
     ("Component.arc", "14"),
     ("TextComponent.arc", "14"),
     ("Button.arc", "999"),
-    ("Button.background", "#0f2b40"),
-    ("Button.hoverBackground", "#143750"),
-    ("Button.pressedBackground", "#0b2233"),
-    ("Button.borderColor", "#1b4460"),
-    ("TextField.background", "#0b2233"),
-    ("TextArea.background", "#0b2233"),
-    ("ComboBox.background", "#0b2233"),
-    ("ComboBox.buttonBackground", "#0b2233"),
-    ("TabbedPane.underlineColor", LOOK_ACCENT_HEX),
     ("TabbedPane.tabHeight", "36"),
     ("TabbedPane.showTabSeparators", "false"),
     ("ProgressBar.arc", "999"),
-    ("ProgressBar.foreground", LOOK_ACCENT_HEX),
-    ("ProgressBar.background", "#16364d"),
     ("ScrollBar.width", "12"),
     ("ScrollBar.thumbArc", "999"),
     ("ScrollBar.thumbInsets", "2,2,2,2"),
     ("SplitPane.dividerSize", "10"),
-    ("TitledBorder.titleColor", "#7fa3b5"),
-    ("TitledBorder.position", "ABOVE_TOP"),
-    ("TitledBorder.border", "8,10,10,10,#16364d,1,16")
+    ("TitledBorder.position", "ABOVE_TOP")
 ]
+# The palettes, one per look. Dark is deep water with one glowing accent;
+# Light is white and soft grey with one blue accent. In each:
+#   "extras"   the colors FlatLaf is given,
+#   "primary"  the colors of the one filled button of a section,
+#   the rest   what the painted parts of the window use: "back" and
+#              "glow_back" (edge and middle of the Results tab), "line"
+#              (hairlines), "track" (an empty ring), "text", "faint",
+#              "accent" with the text color that goes "on_accent", "tints"
+#              (one per kind of measurement) with the darker "tint_texts"
+#              for words, "rings" (one per region, from the outside in),
+#              "glow" (how strong the halo of an arc is), and "veil" with
+#              "veil_text" (what covers the picture under the pointer).
+LOOK_PALETTES = {
+    LOOK_DARK: {
+        "dark": True,
+        "back": Color(6, 18, 31),
+        "glow_back": Color(11, 34, 51),
+        "line": Color(22, 54, 77),
+        "track": Color(22, 54, 77),
+        "text": Color(221, 243, 245),
+        "faint": Color(127, 163, 181),
+        "accent": Color(94, 242, 224),
+        "accent_text": Color(94, 242, 224),
+        "on_accent": Color(6, 18, 31),
+        "tints": {"count": Color(94, 242, 224), "density": Color(155, 140, 255), "percent": Color(255, 122, 107)},
+        "tint_texts": {"count": Color(94, 242, 224), "density": Color(155, 140, 255), "percent": Color(255, 122, 107)},
+        "rings": [
+            Color(94, 242, 224), Color(155, 140, 255), Color(255, 122, 107),
+            Color(255, 214, 110), Color(120, 180, 255), Color(232, 140, 255)
+        ],
+        "glow": 1.0,
+        "veil": Color(6, 18, 31, 170),
+        "veil_text": Color(94, 242, 224),
+        "primary": "background: #5ef2e0; hoverBackground: #8af7ea; pressedBackground: #3fd6c4; foreground: #06121f",
+        "extras": [
+            ("@background", "#081a29"),
+            ("@foreground", "#ddf3f5"),
+            ("@accentColor", "#5ef2e0"),
+            ("Label.disabledForeground", "#7fa3b5"),
+            ("Component.borderColor", "#1b4460"),
+            ("Button.background", "#0f2b40"),
+            ("Button.hoverBackground", "#143750"),
+            ("Button.pressedBackground", "#0b2233"),
+            ("Button.borderColor", "#1b4460"),
+            ("TextField.background", "#0b2233"),
+            ("TextArea.background", "#0b2233"),
+            ("ComboBox.background", "#0b2233"),
+            ("ComboBox.buttonBackground", "#0b2233"),
+            ("TabbedPane.underlineColor", "#5ef2e0"),
+            ("ProgressBar.foreground", "#5ef2e0"),
+            ("ProgressBar.background", "#16364d"),
+            ("TitledBorder.titleColor", "#7fa3b5"),
+            ("TitledBorder.border", "8,10,10,10,#16364d,1,16")
+        ]
+    },
+    LOOK_LIGHT: {
+        "dark": False,
+        "back": Color(245, 245, 247),
+        "glow_back": Color(255, 255, 255),
+        "line": Color(210, 210, 215),
+        "track": Color(232, 232, 237),
+        "text": Color(29, 29, 31),
+        "faint": Color(110, 110, 115),
+        "accent": Color(0, 113, 227),
+        "accent_text": Color(0, 102, 204),
+        "on_accent": Color(255, 255, 255),
+        "tints": {"count": Color(0, 122, 255), "density": Color(175, 82, 222), "percent": Color(255, 149, 0)},
+        "tint_texts": {"count": Color(0, 102, 204), "density": Color(137, 68, 171), "percent": Color(201, 52, 0)},
+        "rings": [
+            Color(0, 122, 255), Color(175, 82, 222), Color(255, 149, 0),
+            Color(52, 199, 89), Color(255, 45, 85), Color(48, 176, 199)
+        ],
+        "glow": 0.5,
+        "veil": Color(0, 0, 0, 120),
+        "veil_text": Color(255, 255, 255),
+        "primary": "background: #0071e3; hoverBackground: #0077ed; pressedBackground: #006edb; foreground: #ffffff",
+        "extras": [
+            ("@background", "#f5f5f7"),
+            ("@foreground", "#1d1d1f"),
+            ("@accentColor", "#0071e3"),
+            ("Label.disabledForeground", "#6e6e73"),
+            ("Component.borderColor", "#d2d2d7"),
+            ("Button.background", "#ffffff"),
+            ("Button.hoverBackground", "#f0f0f3"),
+            ("Button.pressedBackground", "#e8e8ed"),
+            ("Button.borderColor", "#d2d2d7"),
+            ("TextField.background", "#ffffff"),
+            ("TextArea.background", "#ffffff"),
+            ("ComboBox.background", "#ffffff"),
+            ("ComboBox.buttonBackground", "#ffffff"),
+            ("TabbedPane.underlineColor", "#0071e3"),
+            ("ProgressBar.foreground", "#0071e3"),
+            ("ProgressBar.background", "#e8e8ed"),
+            ("TitledBorder.titleColor", "#6e6e73"),
+            ("TitledBorder.border", "8,10,10,10,#d2d2d7,1,16")
+        ]
+    }
+}
 CHANNEL_SWATCHES = {
     "Blue": Color(120, 180, 255), "Green": Color(94, 242, 160), "Red": Color(255, 122, 107),
     "Magenta": Color(232, 140, 255), "Cyan": Color(94, 242, 224), "Yellow": Color(255, 214, 110)
 }
 CHANNEL_SERIES = [Color(94, 242, 224), Color(155, 140, 255), Color(255, 122, 107), Color(255, 214, 110)]
-# One color per ring of the organoid map, from the outside in.
-RING_COLORS = [
-    Color(94, 242, 224), Color(155, 140, 255), Color(255, 122, 107),
-    Color(255, 214, 110), Color(120, 180, 255), Color(232, 140, 255)
-]
 RING_LIMIT = 8
 PILLS_LABEL = "RINGS SHOW"
 PICTURE_BADGE = "Enlarge"
@@ -675,23 +742,30 @@ def look_caps_font(size):
 
 
 def look_install(name=LOOK_DARK):
-    """Switch Fiji to the window's look (event thread). True when it is on."""
+    """Switch Fiji to one of the window's looks, Dark or Light (event
+    thread). True when it is on."""
+    if name not in LOOK_PALETTES:
+        name = LOOK_DARK
     if LOOK_STATE["active"] and LOOK_STATE["name"] == name:
         return True
     try:
-        from com.formdev.flatlaf import FlatLaf, FlatDarkLaf
+        from com.formdev.flatlaf import FlatLaf, FlatDarkLaf, FlatLightLaf
         look_fonts_load()
         if not LOOK_STATE["active"]:
             # The look object itself is kept, to be handed back by look_restore().
             LOOK_STATE["previous"] = UIManager.getLookAndFeel()
             LOOK_STATE["extras"] = FlatLaf.getGlobalExtraDefaults()
+        palette = LOOK_PALETTES[name]
         extras = HashMap()
-        for pair in LOOK_EXTRAS:
+        for pair in LOOK_SHAPE_EXTRAS + palette["extras"]:
             extras.put(pair[0], pair[1])
         if "ui" in LOOK_FONTS:
             extras.put("defaultFont", "13 " + LOOK_UI_FAMILY)
         FlatLaf.setGlobalExtraDefaults(extras)
-        FlatDarkLaf.setup()
+        if palette["dark"]:
+            FlatDarkLaf.setup()
+        else:
+            FlatLightLaf.setup()
         FlatLaf.updateUI()
         LOOK_STATE["active"] = True
         LOOK_STATE["name"] = name
@@ -736,6 +810,19 @@ def look_is_dark():
     return (back.getRed() + back.getGreen() + back.getBlue()) < 384
 
 
+def look_palette():
+    """The colors of the look in use. Under Fiji's own look: the palette
+    that suits it, the dark one or the light one."""
+    if LOOK_STATE["active"] and LOOK_STATE["name"] in LOOK_PALETTES:
+        return LOOK_PALETTES[LOOK_STATE["name"]]
+    return LOOK_PALETTES[LOOK_DARK if look_is_dark() else LOOK_LIGHT]
+
+
+def look_faded(color, alpha):
+    """color, see-through: alpha 0 is nothing, 255 is solid."""
+    return Color(color.getRed(), color.getGreen(), color.getBlue(), max(0, min(255, int(round(alpha)))))
+
+
 def look_mix(first, second, share):
     """A color between first and second: share 0 is first, 1 is second."""
     return Color(
@@ -752,14 +839,14 @@ def look_smooth(graphics):
 
 
 def style_button(button, kind="plain"):
-    """One filled, glowing button per section ("primary"), the rest plain.
-    Looks other than FlatLaf ignore this."""
+    """One filled button per section ("primary"), in the accent of the look
+    in use; the rest plain. Looks other than FlatLaf ignore this."""
     try:
+        # Kept on the button, so that it can be colored again when the look changes.
+        button.putClientProperty("cellquant.kind", kind)
         if kind == "primary":
             button.putClientProperty(
-                "FlatLaf.style",
-                "background: #5ef2e0; hoverBackground: #8af7ea; pressedBackground: #3fd6c4; "
-                "foreground: #06121f; borderWidth: 0; font: bold; margin: 5,14,5,14"
+                "FlatLaf.style", look_palette()["primary"] + "; borderWidth: 0; font: bold; margin: 5,14,5,14"
             )
         else:
             button.putClientProperty("FlatLaf.style", "margin: 5,14,5,14")
@@ -768,21 +855,30 @@ def style_button(button, kind="plain"):
     return button
 
 
-def paint_fitted(graphics, text, left, baseline, room):
-    """Draw text that never runs past room pixels: it is shortened with
-    three dots when it is too long. Returns the width drawn."""
+def fit_text(graphics, text, room):
+    """text as it fits in room pixels: shortened with three dots when it is
+    too long, and empty when not even that fits."""
     text = to_text(text)
     metrics = graphics.getFontMetrics()
     if room <= 0:
-        return 0
+        return u""
     if metrics.stringWidth(text) > room:
         while len(text) > 1 and metrics.stringWidth(text + "...") > room:
             text = text[:-1]
         text = text + "..."
         if metrics.stringWidth(text) > room:
-            return 0
+            return u""
+    return text
+
+
+def paint_fitted(graphics, text, left, baseline, room):
+    """Draw text that never runs past room pixels: it is shortened with
+    three dots when it is too long. Returns the width drawn."""
+    text = fit_text(graphics, text, room)
+    if len(text) == 0:
+        return 0
     graphics.drawString(text, int(left), int(baseline))
-    return metrics.stringWidth(text)
+    return graphics.getFontMetrics().stringWidth(text)
 
 
 def channel_swatch(config, position):
@@ -1203,7 +1299,7 @@ class DropZonePanel(JPanel):
         top = max(22, (height - block) // 2)
         # An arrow into a tray.
         graphics.setStroke(BasicStroke(2.5, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND))
-        graphics.setColor(LOOK_ACCENT)
+        graphics.setColor(look_palette()["accent"])
         graphics.drawLine(center, top, center, top + 34)
         graphics.drawLine(center - 12, top + 22, center, top + 34)
         graphics.drawLine(center + 12, top + 22, center, top + 34)
@@ -1285,6 +1381,9 @@ class ResultsCanvas(JPanel):
         self.over = None
         # Called by the Analyse button; the window sets it.
         self.on_run = None
+        # The colors of the look in use; read again at every painting.
+        self.shades = look_palette()
+        self.track = self.shades["track"]
         self.setOpaque(True)
         watcher = RingWatcher(self)
         self.addMouseMotionListener(watcher)
@@ -1444,12 +1543,20 @@ class ResultsCanvas(JPanel):
 
     # ----- painting -----
 
+    def ring_color(self, index):
+        """The color of a region: of its ring, its row and its outline."""
+        rings = self.shades["rings"]
+        return rings[index % len(rings)]
+
     def colors(self):
         own = LOOK_STATE["active"]
-        back = LOOK_DEEP if own else look_color("Panel.background", Color(245, 245, 245))
-        text = LOOK_TEXT if own else look_color("Label.foreground", Color.black)
-        faint = LOOK_FAINT if own else look_mix(text, back, 0.45)
-        line = LOOK_LINE if own else look_mix(back, text, 0.18)
+        shades = look_palette()
+        back = shades["back"] if own else look_color("Panel.background", Color(245, 245, 245))
+        text = shades["text"] if own else look_color("Label.foreground", Color.black)
+        faint = shades["faint"] if own else look_mix(text, back, 0.45)
+        line = shades["line"] if own else look_mix(back, text, 0.18)
+        self.shades = shades
+        self.track = shades["track"] if own else line
         return (own, back, text, faint, line)
 
     def paintComponent(self, graphics):
@@ -1460,10 +1567,11 @@ class ResultsCanvas(JPanel):
         height = shape["height"]
         own, back, text, faint, line = self.colors()
         if own:
-            # Deep water: lighter around the map, dark at the edges.
+            # Lit around the map, the plain background of the window at the edges.
             reach = float(max(width, height)) * 0.7
             graphics.setPaint(RadialGradientPaint(
-                float(shape["x"]), float(shape["y"]), max(1.0, reach), [0.0, 1.0], [LOOK_PANEL, LOOK_DEEP]
+                float(shape["x"]), float(shape["y"]), max(1.0, reach), [0.0, 1.0],
+                [self.shades["glow_back"], self.shades["back"]]
             ))
             graphics.fillRect(0, 0, width, height)
         self.paint_run(graphics, shape, back)
@@ -1476,7 +1584,7 @@ class ResultsCanvas(JPanel):
         if shape["show_right"]:
             self.paint_regions(graphics, shape, text, faint, line)
         if self.zoom:
-            self.paint_zoom(graphics, width, height, text, faint)
+            self.paint_zoom(graphics, width, height, back, faint)
 
     def paint_empty(self, graphics, shape, text, faint, line):
         """Before the first run: the empty rings and one line of help."""
@@ -1486,7 +1594,7 @@ class ResultsCanvas(JPanel):
         for share in [1.0, 0.72, 0.44]:
             radius = outer * share - 13
             graphics.setStroke(BasicStroke(26.0))
-            graphics.setColor(line)
+            graphics.setColor(self.track)
             graphics.draw(Ellipse2D.Float(center_x - radius, center_y - radius, 2 * radius, 2 * radius))
         graphics.setFont(look_caps_font(11))
         graphics.setColor(faint)
@@ -1538,7 +1646,8 @@ class ResultsCanvas(JPanel):
         graphics.setFont(look_caps_font(11))
         graphics.setColor(faint)
         graphics.drawString(PILLS_LABEL, 26, int(shape["pills_top"] - 12))
-        tints = {"count": LOOK_ACCENT, "density": LOOK_VIOLET, "percent": LOOK_CORAL}
+        tints = self.shades["tints"]
+        tint_texts = self.shades["tint_texts"]
         for index in range(len(pills)):
             left, top, wide, high = pills[index]
             outline = RoundRectangle2D.Float(left, top, wide, high, high, high)
@@ -1546,7 +1655,7 @@ class ResultsCanvas(JPanel):
             pointed = self.over == ("pill", index)
             tint = tints[found[index]["unit"]]
             if chosen or pointed:
-                graphics.setColor(Color(tint.getRed(), tint.getGreen(), tint.getBlue(), 44 if chosen else 22))
+                graphics.setColor(look_faded(tint, 44 if chosen else 22))
                 graphics.fill(outline)
             graphics.setStroke(BasicStroke(1.6 if chosen else 1.0))
             graphics.setColor(tint if chosen else (look_mix(line, text, 0.45) if pointed else look_mix(line, text, 0.18)))
@@ -1554,7 +1663,7 @@ class ResultsCanvas(JPanel):
             word = METRIC_WORDS[found[index]["unit"]]
             graphics.setFont(look_font("ui_semibold", 13))
             word_wide = graphics.getFontMetrics().stringWidth(word)
-            graphics.setColor(tint)
+            graphics.setColor(tint_texts[found[index]["unit"]])
             graphics.drawString(word, int(left + wide - 18 - word_wide), int(top + 25))
             graphics.setFont(look_font("ui", 13))
             graphics.setColor(text if (chosen or pointed) else look_mix(faint, text, 0.5))
@@ -1564,16 +1673,17 @@ class ResultsCanvas(JPanel):
         """Left, at the bottom: the glowing Analyse button."""
         left, top, wide, high = shape["run"]
         pointed = self.over == ("run",)
-        tint = LOOK_ACCENT
+        tint = self.shades["accent"]
+        glow = self.shades["glow"]
         for halo in [(14.0, 18), (8.0, 34), (3.0, 60)]:
-            graphics.setColor(Color(tint.getRed(), tint.getGreen(), tint.getBlue(), halo[1] + (14 if pointed else 0)))
+            graphics.setColor(look_faded(tint, (halo[1] + (14 if pointed else 0)) * glow))
             graphics.fill(RoundRectangle2D.Float(
                 left - halo[0], top - halo[0], wide + 2 * halo[0], high + 2 * halo[0], high + 2 * halo[0], high + 2 * halo[0]
             ))
         graphics.setColor(look_mix(tint, Color.white, 0.25) if pointed else tint)
         graphics.fill(RoundRectangle2D.Float(left, top, wide, high, high, high))
         graphics.setFont(look_font("ui_bold", 16))
-        graphics.setColor(LOOK_DEEP)
+        graphics.setColor(self.shades["on_accent"])
         label_wide = graphics.getFontMetrics().stringWidth(RUN_LABEL)
         graphics.drawString(RUN_LABEL, int(left + (wide - label_wide) / 2.0), int(top + high / 2.0 + 6))
 
@@ -1591,10 +1701,10 @@ class ResultsCanvas(JPanel):
         center_y = shape["y"]
         for index in range(len(shape["rings"])):
             radius, band = shape["rings"][index]
-            color = RING_COLORS[index % len(RING_COLORS)]
+            color = self.ring_color(index)
             dimmed = self.hover is not None and self.hover != index
             graphics.setStroke(BasicStroke(float(band)))
-            graphics.setColor(line)
+            graphics.setColor(self.track)
             graphics.draw(Ellipse2D.Float(center_x - radius, center_y - radius, 2 * radius, 2 * radius))
             number = values[index]
             if number is None or number <= 0:
@@ -1605,7 +1715,7 @@ class ResultsCanvas(JPanel):
                 # The glow: the same arc, wider and faint, under the arc itself.
                 for halo in [(band + 22.0, 14), (band + 12.0, 26), (band + 5.0, 46)]:
                     graphics.setStroke(BasicStroke(halo[0], BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND))
-                    graphics.setColor(Color(color.getRed(), color.getGreen(), color.getBlue(), halo[1]))
+                    graphics.setColor(look_faded(color, halo[1] * self.shades["glow"]))
                     graphics.draw(arc)
             graphics.setStroke(BasicStroke(max(3.0, band - 6.0), BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND))
             graphics.setColor(look_mix(color, back, 0.62) if dimmed else color)
@@ -1618,7 +1728,7 @@ class ResultsCanvas(JPanel):
             name, xs, ys = parents[index]
             if len(xs) < 3:
                 continue
-            color = RING_COLORS[index % len(RING_COLORS)]
+            color = self.ring_color(index)
             path = Path2D.Float()
             path.moveTo(left + xs[0] * scale, top + ys[0] * scale)
             for corner in range(1, len(xs)):
@@ -1629,10 +1739,18 @@ class ResultsCanvas(JPanel):
                 graphics.setColor(color)
                 graphics.draw(path)
                 graphics.setFont(look_font("ui_semibold", 13))
-                paint_fitted(graphics, name, left + min(xs) * scale + 8, top + min(ys) * scale + 20,
-                             (max(xs) - min(xs)) * scale - 16)
+                shown = fit_text(graphics, name, (max(xs) - min(xs)) * scale - 36)
+                if len(shown) > 0:
+                    # The name on a dark tag: readable over any part of the picture.
+                    tag_left = left + min(xs) * scale + 8
+                    tag_top = top + min(ys) * scale + 8
+                    tag_wide = graphics.getFontMetrics().stringWidth(shown) + 20
+                    graphics.setColor(Color(0, 0, 0, 170))
+                    graphics.fill(RoundRectangle2D.Float(tag_left, tag_top, float(tag_wide), 24.0, 24.0, 24.0))
+                    graphics.setColor(color)
+                    graphics.drawString(shown, int(tag_left + 10), int(tag_top + 17))
             elif self.hover == index:
-                graphics.setColor(Color(color.getRed(), color.getGreen(), color.getBlue(), 70))
+                graphics.setColor(look_faded(color, 70))
                 graphics.fill(path)
                 graphics.setStroke(BasicStroke(2.0))
                 graphics.setColor(color)
@@ -1660,10 +1778,10 @@ class ResultsCanvas(JPanel):
         pointed = self.over == ("picture",)
         if pointed:
             # Under the pointer the picture says what a click does.
-            graphics.setColor(Color(LOOK_DEEP.getRed(), LOOK_DEEP.getGreen(), LOOK_DEEP.getBlue(), 170))
+            graphics.setColor(self.shades["veil"])
             graphics.fill(window)
             graphics.setFont(look_font("ui_bold", 13))
-            graphics.setColor(LOOK_ACCENT)
+            graphics.setColor(self.shades["veil_text"])
             badge_wide = graphics.getFontMetrics().stringWidth(PICTURE_BADGE)
             graphics.drawString(PICTURE_BADGE, int(center_x - badge_wide / 2.0), int(center_y + 22))
             graphics.setStroke(BasicStroke(2.0, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND))
@@ -1674,15 +1792,15 @@ class ResultsCanvas(JPanel):
             graphics.drawPolyline([icon_x, icon_x, icon_x + 8], [icon_y + 8, icon_y + 16, icon_y + 16], 3)
         graphics.setClip(old_clip)
         graphics.setStroke(BasicStroke(2.5 if pointed else 1.5))
-        graphics.setColor(LOOK_ACCENT if pointed else line)
+        graphics.setColor(self.shades["accent"] if pointed else line)
         graphics.draw(window)
 
-    def paint_zoom(self, graphics, width, height, text, faint):
+    def paint_zoom(self, graphics, width, height, back, faint):
         """All of the picture, uncropped, over the map; a click closes it."""
         picture = self.pictures[0]
         image = picture[1]
         parents = picture[2] if len(picture) > 2 else []
-        graphics.setColor(LOOK_DEEP)
+        graphics.setColor(back)
         graphics.fillRect(0, 0, width, height)
         room_width = width - 56
         room_height = height - 76
@@ -1707,9 +1825,9 @@ class ResultsCanvas(JPanel):
         graphics.setFont(look_font("ui_semibold", 12))
         words = "Back to the map"
         back_wide = graphics.getFontMetrics().stringWidth(words) + 30
-        graphics.setColor(LOOK_ACCENT)
+        graphics.setColor(self.shades["accent"])
         graphics.fill(RoundRectangle2D.Float(width - back_wide - 18.0, 16.0, float(back_wide), 28.0, 28.0, 28.0))
-        graphics.setColor(LOOK_DEEP)
+        graphics.setColor(self.shades["on_accent"])
         graphics.drawString(words, int(width - back_wide - 18 + 15), 35)
 
     def paint_regions(self, graphics, shape, text, faint, line):
@@ -1728,9 +1846,9 @@ class ResultsCanvas(JPanel):
         areas = self.data.get("areas", [])
         for index in range(len(rows)):
             row_left, row_top, row_wide, row_high = rows[index]
-            color = RING_COLORS[index % len(RING_COLORS)]
+            color = self.ring_color(index)
             if self.hover == index:
-                graphics.setColor(Color(color.getRed(), color.getGreen(), color.getBlue(), 30))
+                graphics.setColor(look_faded(color, 30))
                 graphics.fill(RoundRectangle2D.Float(row_left - 10, row_top + 2, row_wide + 14, row_high - 4, 14.0, 14.0))
             graphics.setColor(line)
             graphics.setStroke(BasicStroke(1.0))
@@ -2131,7 +2249,7 @@ class CellQuantStudioUniversal(JFrame):
         self.look_combo = JComboBox(LOOK_NAMES)
         self.look_combo.setSelectedItem(look_preference())
         self.look_combo.setToolTipText(
-            "Dark gives the whole of Fiji this window's look while it is open; Fiji default leaves Fiji alone. The choice is remembered."
+            "Dark and Light give the whole of Fiji this window's look while it is open; Fiji default leaves Fiji alone. The choice is remembered."
         )
         self.look_combo.addActionListener(self.look_changed)
         side.add(look_label)
@@ -2150,11 +2268,22 @@ class CellQuantStudioUniversal(JFrame):
             look_restore()
         else:
             look_install(chosen)
+        # The filled buttons take the accent of the new look.
+        self.color_buttons(self.getContentPane())
         # Another look means another font: shape the tabs again.
         for tab_index in range(self.main_tabs.getTabCount()):
             tidy_tab(self.main_tabs.getComponentAt(tab_index))
         self.revalidate()
         self.repaint()
+
+    def color_buttons(self, container):
+        """Give every filled button the accent of the look in use."""
+        for child in container.getComponents():
+            if isinstance(child, JButton):
+                if child.getClientProperty("cellquant.kind") == "primary":
+                    style_button(child, "primary")
+            elif hasattr(child, "getComponents"):
+                self.color_buttons(child)
 
     def style_buttons(self, container):
         """Round every button that has no style of its own yet."""
