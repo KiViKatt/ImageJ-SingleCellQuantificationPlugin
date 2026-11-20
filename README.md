@@ -33,11 +33,13 @@ Built-in tools check the results: object counts against manual point marks, mask
 ![One ring metric chosen and one region pointed at](docs/images/results_hover.jpg)
 
 ![The whole picture after a click](docs/images/results_picture.jpg)
-- **Appearance.** The window has its own look: deep-water blues with one glowing accent, IBM Plex Sans for the interface and Chakra Petch, an angular technical face, for the title and the figures. Both fonts are in the `fonts` folder under the SIL Open Font License; without them the window uses the system fonts. The look is built on FlatLaf's dark theme, which ships with Fiji. A Swing theme applies to every Fiji window, so Fiji changes with it while Cell Quant Studio is open and gets its previous look back when the window closes. **Appearance > Fiji default** at the top right leaves Fiji as it is; the choice is remembered.
+- **Appearance.** The window has two looks of its own, chosen under **Appearance** at the top right: **Dark**, deep-water blues with one glowing accent, and **Light**, white and soft grey with one blue accent. Both use IBM Plex Sans for the interface and Chakra Petch, an angular technical face, for the title and the figures. The fonts are in the `fonts` folder under the SIL Open Font License; without them the window uses the system fonts. The looks are built on FlatLaf's dark and light themes, which ship with Fiji. A Swing theme applies to every Fiji window, so Fiji changes with it while Cell Quant Studio is open and gets its previous look back when the window closes. **Appearance > Fiji default** leaves Fiji as it is; the choice is remembered.
 
 - **Session tab.** A drop zone for the image file with the workflow steps, and a small picture of the source image beside its description.
 
-![The Session tab in the dark appearance](docs/images/session_tab.jpg)
+![The Session tab in the Dark appearance](docs/images/session_tab.jpg)
+
+![The Results tab in the Light appearance](docs/images/results_tab_light.jpg)
 
 ## Capabilities
 

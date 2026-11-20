@@ -2387,6 +2387,28 @@ def step_look(ctx, t):
         on_edt(lambda: window.look_combo.setSelectedItem(wanted), "choosing the remembered look again")
         settle(ctx)
         t.check(state["active"] and state["name"] == wanted, "and the window's look comes back")
+        # Both looks of the window, one after the other: each has its own
+        # palette, the filled button takes its accent, and the Results tab
+        # is painted on its background.
+        t.equal([as_text(window.look_combo.getItemAt(index)) for index in range(window.look_combo.getItemCount())],
+                ["Dark", "Light", "Fiji default"], "the title row offers Dark, Light and Fiji default")
+        run_button = button_labelled(window, "3. Run analysis")
+        for name in [ns["LOOK_LIGHT"], ns["LOOK_DARK"]]:
+            on_edt(lambda: window.look_combo.setSelectedItem(name), "choosing " + name)
+            settle(ctx)
+            palette = ns["LOOK_PALETTES"][name]
+            dark = name == ns["LOOK_DARK"]
+            t.check(state["active"] and state["name"] == name, name + " is switched on from the title row")
+            t.equal(ns["look_is_dark"](), dark, name + ": the window is dark exactly when Dark is chosen")
+            t.check(ns["look_palette"]() is palette, name + ": the painted parts use the palette of this look")
+            t.check(palette["primary"] in as_text(run_button.getClientProperty("FlatLaf.style")),
+                    name + ": the filled button has the accent of this look")
+            corner = on_edt(lambda: painted_corner(ns["ResultsCanvas"]()), "painting the Results tab")
+            t.equal(corner < 384, dark, name + ": the Results tab is painted on the background of this look")
+            t.equal(as_text(some_label.getClientProperty("cellquant.text")), label_text, name + ": labels keep their text")
+        on_edt(lambda: window.look_combo.setSelectedItem(wanted), "choosing the remembered look once more")
+        settle(ctx)
+        t.check(state["active"] and state["name"] == wanted, "after both, the remembered look is on again")
         t.equal(as_text(some_label.getClientProperty("cellquant.text")), label_text, "labels keep their text through both changes")
         t.equal(ns["look_preference"](), wanted, "the remembered choice is as it was")
     else:
@@ -2398,12 +2420,31 @@ def step_look(ctx, t):
             "a caption that is too long is shortened to its room")
     t.equal(ns["paint_fitted"](pen, "short", 0, 9, 500), pen.getFontMetrics().stringWidth("short"), "a caption that fits is drawn whole")
     t.equal(ns["paint_fitted"](pen, "anything", 0, 9, 0), 0, "nothing is drawn where there is no room")
+    t.equal(as_text(ns["fit_text"](pen, "short", 500)), "short", "fit_text leaves a text that fits as it is")
+    shortened = as_text(ns["fit_text"](pen, "a rather long caption for a small card", wide // 2))
+    t.check(shortened.endswith("...") and pen.getFontMetrics().stringWidth(shortened) <= wide // 2,
+            "fit_text shortens a long text with three dots, to its room")
+    t.equal(as_text(ns["fit_text"](pen, "anything", 0)), "", "fit_text gives nothing where there is no room")
     pen.dispose()
     on_edt(window.dispose, "closing the window")
     settle(ctx)
     wait_until(lambda: not state["active"], 10.0, "the look to be put back")
     t.check(UIManager.getLookAndFeel() is before, "Fiji has its own look again after the window closed")
     expect_dialogs(ctx, t, [], "switching the look")
+
+
+def painted_corner(canvas):
+    """Paint a results canvas that is in no window and return the brightness
+    (red + green + blue) of a pixel of its background."""
+    canvas.setSize(900, 600)
+    image = BufferedImage(900, 600, BufferedImage.TYPE_INT_RGB)
+    pen = image.createGraphics()
+    try:
+        canvas.paint(pen)
+    finally:
+        pen.dispose()
+    pixel = image.getRGB(3, 3)
+    return ((pixel >> 16) & 255) + ((pixel >> 8) & 255) + (pixel & 255)
 
 
 def step_source_rules(ctx, t):
@@ -2449,7 +2490,7 @@ STEPS = [
     ("ROI, cleanup, and reset actions", step_other_actions),
     ("close and relaunch", step_relaunch),
     ("an image with fewer channels keeps the other channels' settings", step_fewer_channels),
-    ("the dark look is put back; Results tab helpers", step_look),
+    ("the Dark and Light looks, Fiji's own put back; Results tab helpers", step_look),
     ("source rules", step_source_rules)
 ]
 
