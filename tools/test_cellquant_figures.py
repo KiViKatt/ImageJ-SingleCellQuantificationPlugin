@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Ivan Khimach
+# Copyright (C) 2026 Maksym Taran
 
 """Tests of tools/cellquant_figures.py, with small tables whose plotted numbers
 are known. Run with any Python 3:
