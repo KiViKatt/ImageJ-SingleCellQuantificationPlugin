@@ -40,6 +40,7 @@ from javax.swing.plaf.basic import BasicHTML
 from javax.swing.text import View
 from java.awt import LayoutManager, GraphicsEnvironment, RadialGradientPaint, AlphaComposite
 from java.awt.event import MouseAdapter
+from java.awt.font import TextAttribute
 from java.awt.geom import Ellipse2D, Path2D
 from java.awt import (
     BorderLayout, GridBagLayout, GridBagConstraints, Insets, Dimension, Font,
@@ -595,7 +596,9 @@ RING_COLORS = [
 ]
 RING_LIMIT = 8
 PILLS_LABEL = "RINGS SHOW"
-PICTURE_BADGE = "Click to enlarge"
+PICTURE_BADGE = "Enlarge"
+RUN_LABEL = "Analyse"
+METRIC_WORDS = {"count": "objects", "density": "density", "percent": "area"}
 RESULTS_TAB_TITLE = "Results"
 RESULTS_PICTURE_SIZE = 900
 CARD_ARC = 16.0
@@ -653,6 +656,17 @@ def look_font(kind, size):
     if base is None:
         base = Font("SansSerif", Font.PLAIN, 13)
     return base.deriveFont(Font.PLAIN if kind == "ui" else Font.BOLD, float(size))
+
+
+def look_caps_font(size):
+    """The small, spaced-out capitals of the labels."""
+    font = look_font("ui_semibold", size)
+    try:
+        spaced = HashMap()
+        spaced.put(TextAttribute.TRACKING, 0.14)
+        return font.deriveFont(spaced)
+    except ANY_ERROR:
+        return font
 
 
 def look_install(name=LOOK_DARK):
@@ -912,7 +926,11 @@ def results_from_summary(headers, rows, configs):
             })
             metrics.append({"name": name + " positive area", "short": name, "unit": "percent", "color": color, "values": per_region})
     # Counts first: they are what a viewer looks for.
-    tiles = [tile for tile in tiles if tile["kind"] == "count"] + [tile for tile in tiles if tile["kind"] != "count"]
+    counted = [tile["title"][:-len(" objects")] for tile in tiles if tile["kind"] == "count"]
+    shares = [tile for tile in tiles if tile["kind"] != "count"]
+    tiles = [tile for tile in tiles if tile["kind"] == "count"] + \
+        [tile for tile in shares if tile["title"][:-len(" positive area")] not in counted] + \
+        [tile for tile in shares if tile["title"][:-len(" positive area")] in counted]
     metrics = sorted(metrics, key=lambda metric: METRIC_ORDER[metric["unit"]])
     labels = []
     areas = []
@@ -1216,14 +1234,38 @@ class DropZonePanel(JPanel):
             paint_fitted(graphics, self.STEPS[index], left + 30, line, widest)
 
 
-class ResultsCanvas(JPanel):
-    """The organoid map: the picture of the run in a round window, one ring
-    per parent ROI around it (its arc is that region's share of the largest
-    value), the headline figures on the left and the regions on the right.
+def paint_wrapped(graphics, text, left, top, room, line_high):
+    """Draw text in as many lines as its words need for room pixels.
+    Returns the baseline after the last line."""
+    metrics = graphics.getFontMetrics()
+    line = ""
+    for word in to_text(text).split(" "):
+        longer = word if line == "" else line + " " + word
+        if line != "" and metrics.stringWidth(longer) > room:
+            graphics.drawString(line, int(left), int(top))
+            top += line_high
+            line = word
+        else:
+            line = longer
+    if line != "":
+        graphics.drawString(line, int(left), int(top))
+        top += line_high
+    return top
 
-    Pointing at a ring or at a region lights it up, with its outline on the
-    picture. The row of names above the map chooses what the rings show.
-    A click on the picture shows all of it, uncropped; a click closes it."""
+
+class ResultsCanvas(JPanel):
+    """The organoid map.
+
+    Center: wide rings, one per parent ROI, from the outside in; the arc of
+    a ring is that region's share of the largest value. In the middle, the
+    picture of the run in a small round window.
+    Left: the headline figures, the list that chooses what the rings show,
+    and the Analyse button.
+    Right: the regions with their values, and what can be pointed at and
+    clicked.
+
+    Pointing at a ring or a region lights it up, with its outline on the
+    picture. A click on the picture shows all of it; a click closes it."""
 
     def __init__(self):
         JPanel.__init__(self)
@@ -1234,8 +1276,10 @@ class ResultsCanvas(JPanel):
         self.metric = 0
         self.zoom = False
         # What the pointer is over, for the highlight that says "this can be
-        # clicked": None, ("picture",) or ("pill", index).
+        # clicked": None, ("picture",), ("pill", index) or ("run",).
         self.over = None
+        # Called by the Analyse button; the window sets it.
+        self.on_run = None
         self.setOpaque(True)
         watcher = RingWatcher(self)
         self.addMouseMotionListener(watcher)
@@ -1270,55 +1314,61 @@ class ResultsCanvas(JPanel):
         height = self.getHeight()
         labels, values, unit = self.ring_values()
         count = len(labels)
-        side = 270 if width >= 1100 else 210
-        show_right = width >= 820
+        side = 280 if width >= 1100 else 224
+        show_right = width >= 860
         map_left = side
         map_right = width - (side if show_right else 0)
-        # The names that choose what the rings show, in one row above the map.
-        pills = []
-        found = self.metrics()
-        pill_space = 0
-        if len(found) > 1:
-            measure = self.getFontMetrics(look_font("ui_semibold", 12))
-            widths = [measure.stringWidth(metric["name"]) + 26 for metric in found]
-            lead = measure.stringWidth(PILLS_LABEL) + 14
-            total = lead + sum(widths) + 6 * (len(widths) - 1)
-            if total > map_right - map_left - 20:
-                # No room for the label: the choices alone.
-                lead = 0
-                total = sum(widths) + 6 * (len(widths) - 1)
-            if total <= map_right - map_left - 20:
-                start = (map_left + map_right) / 2.0 - total / 2.0 + lead
-                for index in range(len(widths)):
-                    pills.append((start, 14.0, float(widths[index]), 28.0))
-                    start += widths[index] + 6
-                pill_space = 46
-        hint_space = 8
         center_x = (map_left + map_right) / 2.0
-        center_y = pill_space + (height - pill_space - hint_space) / 2.0
-        outer = max(40.0, min(map_right - map_left, height - pill_space - hint_space) / 2.0 - 22.0)
-        band = 16.0
-        gap = 10.0
-        if outer - count * (band + gap) < 80:
-            band = 9.0
-            gap = 6.0
+        center_y = height / 2.0
+        outer = max(60.0, min(map_right - map_left, height) / 2.0 - 30.0)
+        # Wide rings with air between them, around a small core.
+        core = max(44.0, outer * 0.27)
         rings = []
-        for index in range(count):
-            rings.append((outer - index * (band + gap) - band / 2.0, band))
-        picture = max(20.0, outer - count * (band + gap) - 6.0)
+        band = 0.0
+        step = 0.0
+        if count > 0:
+            step = (outer - core) / float(count)
+            band = max(7.0, min(26.0, step * 0.36))
+            for index in range(count):
+                rings.append((outer - band / 2.0 - index * step, band))
+            picture = max(18.0, min(core, rings[-1][0] - band / 2.0 - max(10.0, (step - band) * 0.45)))
+        else:
+            picture = outer * 0.62
+        # Left column, from the bottom up: the Analyse button, the list that
+        # chooses what the rings show, and above it the figures that fit.
+        inner = side - 52
+        run = (26.0, height - 84.0, float(inner), 52.0)
+        found = self.metrics()
+        pills = []
+        pill_high = 40
+        pill_step = 48
+        figure_step = 116
+        figures_top = 26.0
+        room = run[1] - 22 - figures_top - figure_step
+        shown_pills = 0
+        if len(found) > 1:
+            shown_pills = max(0, min(len(found), int((room - 30) // pill_step)))
+            if shown_pills < 2:
+                shown_pills = 0
+        pills_top = run[1] - 22 - shown_pills * pill_step
+        for index in range(shown_pills):
+            pills.append((26.0, pills_top + index * pill_step, float(inner), float(pill_high)))
+        figures_room = (pills_top - (34 if shown_pills > 0 else 0)) - figures_top
+        figures = max(1, int(figures_room // figure_step))
         rows = []
         if show_right:
-            row_high = 60
-            row_top = max(64.0, height / 2.0 - (count * row_high) / 2.0)
+            row_high = 64
             for index in range(count):
-                if row_top + (index + 1) * row_high > height - 30:
+                top = 60.0 + index * row_high
+                if top + row_high > height - 96:
                     break
-                rows.append((map_right + 6, row_top + index * row_high, side - 30, row_high))
+                rows.append((map_right + 4, top, side - 30, row_high))
         return {
             "width": width, "height": height, "side": side, "show_right": show_right,
             "map_left": map_left, "map_right": map_right, "x": center_x, "y": center_y,
             "rings": rings, "band": band, "picture": picture, "rows": rows, "pills": pills,
-            "outer": outer
+            "outer": outer, "run": run, "figures": figures, "figures_top": figures_top,
+            "figure_step": figure_step, "pills_top": pills_top
         }
 
     def ring_at(self, x, y):
@@ -1327,7 +1377,7 @@ class ResultsCanvas(JPanel):
         distance = math.sqrt((x - shape["x"]) ** 2 + (y - shape["y"]) ** 2)
         for index in range(len(shape["rings"])):
             radius, band = shape["rings"][index]
-            if abs(distance - radius) <= band / 2.0 + 4:
+            if abs(distance - radius) <= band / 2.0 + 5:
                 return index
         for index in range(len(shape["rows"])):
             left, top, wide, high = shape["rows"][index]
@@ -1343,6 +1393,10 @@ class ResultsCanvas(JPanel):
                 return index
         return None
 
+    def on_run_button(self, x, y):
+        left, top, wide, high = self.geometry()["run"]
+        return left <= x <= left + wide and top <= y <= top + high
+
     def on_picture(self, x, y):
         shape = self.geometry()
         return len(self.pictures) > 0 and math.sqrt((x - shape["x"]) ** 2 + (y - shape["y"]) ** 2) <= shape["picture"]
@@ -1354,6 +1408,8 @@ class ResultsCanvas(JPanel):
             pill = self.pill_at(x, y)
             if pill is not None:
                 over = ("pill", pill)
+            elif self.on_run_button(x, y):
+                over = ("run",)
             elif self.on_picture(x, y):
                 over = ("picture",)
         clickable = self.zoom or over is not None
@@ -1373,6 +1429,9 @@ class ResultsCanvas(JPanel):
             pill = self.pill_at(x, y)
             if pill is not None:
                 self.metric = pill
+            elif self.on_run_button(x, y):
+                if self.on_run is not None:
+                    self.on_run()
             elif self.on_picture(x, y):
                 self.zoom = True
                 self.hover = None
@@ -1397,98 +1456,121 @@ class ResultsCanvas(JPanel):
         own, back, text, faint, line = self.colors()
         if own:
             # Deep water: lighter around the map, dark at the edges.
-            reach = float(max(width, height)) * 0.75
+            reach = float(max(width, height)) * 0.7
             graphics.setPaint(RadialGradientPaint(
                 float(shape["x"]), float(shape["y"]), max(1.0, reach), [0.0, 1.0], [LOOK_PANEL, LOOK_DEEP]
             ))
             graphics.fillRect(0, 0, width, height)
+        self.paint_run(graphics, shape, back)
         if self.data is None or (len(self.data["tiles"]) == 0 and len(self.pictures) == 0):
-            self.paint_empty(graphics, width, height, text, faint)
+            self.paint_empty(graphics, shape, text, faint, line)
             return
         self.paint_figures(graphics, shape, text, faint)
-        self.paint_map(graphics, shape, back, text, faint, line)
         self.paint_pills(graphics, shape, back, text, faint, line)
+        self.paint_map(graphics, shape, back, text, faint, line)
         if shape["show_right"]:
             self.paint_regions(graphics, shape, text, faint, line)
         if self.zoom:
             self.paint_zoom(graphics, width, height, text, faint)
 
-    def paint_empty(self, graphics, width, height, text, faint):
-        graphics.setFont(look_font("figure", 30))
-        graphics.setColor(text)
-        headline = "No results yet"
-        graphics.drawString(headline, (width - graphics.getFontMetrics().stringWidth(headline)) // 2, height // 2 - 6)
-        graphics.setFont(look_font("ui", 13))
+    def paint_empty(self, graphics, shape, text, faint, line):
+        """Before the first run: the empty rings and one line of help."""
+        center_x = shape["x"]
+        center_y = shape["y"]
+        outer = shape["outer"]
+        for share in [1.0, 0.72, 0.44]:
+            radius = outer * share - 13
+            graphics.setStroke(BasicStroke(26.0))
+            graphics.setColor(line)
+            graphics.draw(Ellipse2D.Float(center_x - radius, center_y - radius, 2 * radius, 2 * radius))
+        graphics.setFont(look_caps_font(11))
         graphics.setColor(faint)
-        hint = "Open an image on the Session tab and press '3. Run analysis'."
-        shown_width = min(graphics.getFontMetrics().stringWidth(hint), width - 40)
-        paint_fitted(graphics, hint, (width - shown_width) // 2, height // 2 + 22, width - 40)
+        graphics.drawString("NO RESULTS YET", 26, 44)
+        graphics.setFont(look_font("ui", 13))
+        paint_wrapped(graphics, "Open an image on the Session tab, then press Analyse.", 26, 70, shape["side"] - 52, 19)
 
     def paint_figures(self, graphics, shape, text, faint):
-        """Left: one large figure per measurement."""
-        room = shape["side"] - 44
-        tiles = self.data["tiles"]
-        step = 124
-        fit = max(1, int((shape["height"] - 40) // step))
-        tiles = tiles[:fit]
-        top = max(28.0, shape["height"] / 2.0 - len(tiles) * step / 2.0)
+        """Left, from the top: one large figure per measurement."""
+        room = shape["side"] - 52
+        tiles = self.data["tiles"][:shape["figures"]]
         for index in range(len(tiles)):
             tile = tiles[index]
-            base = top + index * step
-            graphics.setColor(tile["color"])
-            graphics.fillOval(26, int(base + 3), 8, 8)
-            graphics.setFont(look_font("ui_semibold", 11))
+            base = shape["figures_top"] + index * shape["figure_step"]
+            graphics.setFont(look_caps_font(11))
             graphics.setColor(faint)
-            paint_fitted(graphics, tile["title"].upper(), 42, base + 12, room - 16)
+            paint_fitted(graphics, tile["title"].upper(), 26, base + 14, room)
             shown = tile["value"] * self.progress
-            unit = "percent" if tile["kind"] == "percent" else "count"
-            figure = format_metric(shown, unit)
-            final = format_metric(tile["value"], unit)
-            size = 50
+            percent = tile["kind"] == "percent"
+            figure = ("%.1f" % shown) if percent else format_count(shown)
+            final = ("%.1f" % tile["value"]) if percent else format_count(tile["value"])
+            size = 56
             graphics.setFont(look_font("figure", size))
-            while size > 24 and graphics.getFontMetrics().stringWidth(final) > room:
+            while size > 26 and graphics.getFontMetrics().stringWidth(final) > room - (26 if percent else 0):
                 size -= 4
                 graphics.setFont(look_font("figure", size))
             graphics.setColor(text)
-            graphics.drawString(figure, 26, int(base + 62))
+            graphics.drawString(figure, 26, int(base + 68))
+            if percent:
+                # The unit small, beside the figure.
+                figure_wide = graphics.getFontMetrics().stringWidth(figure)
+                graphics.setFont(look_font("ui_semibold", 15))
+                graphics.setColor(faint)
+                graphics.drawString("%", int(26 + figure_wide + 6), int(base + 68))
             graphics.setFont(look_font("ui", 12))
             graphics.setColor(faint)
-            paint_fitted(graphics, tile["note"], 26, base + 84, room)
-            if tile.get("extra", "") != "":
-                paint_fitted(graphics, tile["extra"], 26, base + 101, room)
+            note = tile["note"] if tile.get("extra", "") == "" else tile["note"] + ",  " + tile["extra"]
+            if graphics.getFontMetrics().stringWidth(note) > room:
+                note = tile["note"]
+            paint_fitted(graphics, note, 26, base + 90, room)
 
     def paint_pills(self, graphics, shape, back, text, faint, line):
-        """Above the map: what the rings show. The chosen one is filled."""
+        """Left, above the button: what the rings show. One row per choice;
+        the chosen one is lit."""
         found = self.metrics()
-        graphics.setFont(look_font("ui_semibold", 12))
-        metrics = graphics.getFontMetrics()
-        if len(shape["pills"]) > 0:
-            first = shape["pills"][0]
-            lead = metrics.stringWidth(PILLS_LABEL) + 14
-            if first[0] - lead >= shape["map_left"]:
-                graphics.setFont(look_font("ui_semibold", 11))
-                graphics.setColor(faint)
-                graphics.drawString(PILLS_LABEL, int(first[0] - lead), int(first[1] + 18))
-                graphics.setFont(look_font("ui_semibold", 12))
-        for index in range(len(shape["pills"])):
-            left, top, wide, high = shape["pills"][index]
+        pills = shape["pills"]
+        if len(pills) == 0:
+            return
+        graphics.setFont(look_caps_font(11))
+        graphics.setColor(faint)
+        graphics.drawString(PILLS_LABEL, 26, int(shape["pills_top"] - 12))
+        tints = {"count": LOOK_ACCENT, "density": LOOK_VIOLET, "percent": LOOK_CORAL}
+        for index in range(len(pills)):
+            left, top, wide, high = pills[index]
             outline = RoundRectangle2D.Float(left, top, wide, high, high, high)
+            chosen = index == self.metric
             pointed = self.over == ("pill", index)
-            if index == self.metric:
-                graphics.setColor(LOOK_ACCENT)
+            tint = tints[found[index]["unit"]]
+            if chosen or pointed:
+                graphics.setColor(Color(tint.getRed(), tint.getGreen(), tint.getBlue(), 44 if chosen else 22))
                 graphics.fill(outline)
-                graphics.setColor(LOOK_DEEP)
-            else:
-                # A choice that can be clicked: outlined; brighter under the pointer.
-                if pointed:
-                    graphics.setColor(Color(LOOK_ACCENT.getRed(), LOOK_ACCENT.getGreen(), LOOK_ACCENT.getBlue(), 40))
-                    graphics.fill(outline)
-                graphics.setStroke(BasicStroke(1.5 if pointed else 1.0))
-                graphics.setColor(LOOK_ACCENT if pointed else look_mix(line, text, 0.25))
-                graphics.draw(outline)
-                graphics.setColor(text if pointed else look_mix(faint, text, 0.4))
-            name = found[index]["name"]
-            graphics.drawString(name, int(left + (wide - metrics.stringWidth(name)) / 2.0), int(top + 19))
+            graphics.setStroke(BasicStroke(1.6 if chosen else 1.0))
+            graphics.setColor(tint if chosen else (look_mix(line, text, 0.45) if pointed else look_mix(line, text, 0.18)))
+            graphics.draw(outline)
+            word = METRIC_WORDS[found[index]["unit"]]
+            graphics.setFont(look_font("ui_semibold", 13))
+            word_wide = graphics.getFontMetrics().stringWidth(word)
+            graphics.setColor(tint)
+            graphics.drawString(word, int(left + wide - 18 - word_wide), int(top + 25))
+            graphics.setFont(look_font("ui", 13))
+            graphics.setColor(text if (chosen or pointed) else look_mix(faint, text, 0.5))
+            paint_fitted(graphics, found[index]["short"], left + 18, top + 25, wide - 36 - word_wide - 10)
+
+    def paint_run(self, graphics, shape, back):
+        """Left, at the bottom: the glowing Analyse button."""
+        left, top, wide, high = shape["run"]
+        pointed = self.over == ("run",)
+        tint = LOOK_ACCENT
+        for halo in [(14.0, 18), (8.0, 34), (3.0, 60)]:
+            graphics.setColor(Color(tint.getRed(), tint.getGreen(), tint.getBlue(), halo[1] + (14 if pointed else 0)))
+            graphics.fill(RoundRectangle2D.Float(
+                left - halo[0], top - halo[0], wide + 2 * halo[0], high + 2 * halo[0], high + 2 * halo[0], high + 2 * halo[0]
+            ))
+        graphics.setColor(look_mix(tint, Color.white, 0.25) if pointed else tint)
+        graphics.fill(RoundRectangle2D.Float(left, top, wide, high, high, high))
+        graphics.setFont(look_font("ui_bold", 16))
+        graphics.setColor(LOOK_DEEP)
+        label_wide = graphics.getFontMetrics().stringWidth(RUN_LABEL)
+        graphics.drawString(RUN_LABEL, int(left + (wide - label_wide) / 2.0), int(top + high / 2.0 + 6))
 
     def paint_map(self, graphics, shape, back, text, faint, line):
         labels, values, unit = self.ring_values()
@@ -1516,11 +1598,11 @@ class ResultsCanvas(JPanel):
             arc = Arc2D.Float(center_x - radius, center_y - radius, 2 * radius, 2 * radius, 90.0, sweep, Arc2D.OPEN)
             if not dimmed:
                 # The glow: the same arc, wider and faint, under the arc itself.
-                for halo in [(band + 14.0, 26), (band + 7.0, 46)]:
+                for halo in [(band + 22.0, 14), (band + 12.0, 26), (band + 5.0, 46)]:
                     graphics.setStroke(BasicStroke(halo[0], BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND))
                     graphics.setColor(Color(color.getRed(), color.getGreen(), color.getBlue(), halo[1]))
                     graphics.draw(arc)
-            graphics.setStroke(BasicStroke(band - 4.0, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND))
+            graphics.setStroke(BasicStroke(max(3.0, band - 6.0), BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND))
             graphics.setColor(look_mix(color, back, 0.62) if dimmed else color)
             graphics.draw(arc)
         self.paint_picture(graphics, shape, text, faint, line)
@@ -1545,26 +1627,19 @@ class ResultsCanvas(JPanel):
                 paint_fitted(graphics, name, left + min(xs) * scale + 8, top + min(ys) * scale + 20,
                              (max(xs) - min(xs)) * scale - 16)
             elif self.hover == index:
-                graphics.setColor(Color(color.getRed(), color.getGreen(), color.getBlue(), 46))
+                graphics.setColor(Color(color.getRed(), color.getGreen(), color.getBlue(), 70))
                 graphics.fill(path)
-                graphics.setStroke(BasicStroke(2.5))
+                graphics.setStroke(BasicStroke(2.0))
                 graphics.setColor(color)
-                graphics.draw(path)
-            elif self.hover is None:
-                graphics.setStroke(BasicStroke(1.0))
-                graphics.setColor(Color(221, 243, 245, 90))
                 graphics.draw(path)
 
     def paint_picture(self, graphics, shape, text, faint, line):
-        """The picture of the run in the round window at the center."""
+        """The picture of the run in the small round window at the center."""
         center_x = shape["x"]
         center_y = shape["y"]
         radius = shape["picture"]
         window = Ellipse2D.Float(center_x - radius, center_y - radius, 2 * radius, 2 * radius)
         if len(self.pictures) == 0:
-            graphics.setColor(line)
-            graphics.setStroke(BasicStroke(1.5))
-            graphics.draw(window)
             return
         picture = self.pictures[0]
         image = picture[1]
@@ -1577,39 +1652,25 @@ class ResultsCanvas(JPanel):
         graphics.clip(window)
         graphics.drawImage(image, int(left), int(top), int(image.getWidth() * scale), int(image.getHeight() * scale), None)
         self.paint_outlines(graphics, parents, left, top, scale, False)
-        graphics.setClip(old_clip)
         pointed = self.over == ("picture",)
-        graphics.setStroke(BasicStroke(3.0 if pointed else 2.0))
+        if pointed:
+            # Under the pointer the picture says what a click does.
+            graphics.setColor(Color(LOOK_DEEP.getRed(), LOOK_DEEP.getGreen(), LOOK_DEEP.getBlue(), 170))
+            graphics.fill(window)
+            graphics.setFont(look_font("ui_bold", 13))
+            graphics.setColor(LOOK_ACCENT)
+            badge_wide = graphics.getFontMetrics().stringWidth(PICTURE_BADGE)
+            graphics.drawString(PICTURE_BADGE, int(center_x - badge_wide / 2.0), int(center_y + 22))
+            graphics.setStroke(BasicStroke(2.0, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND))
+            icon_x = int(center_x - 8)
+            icon_y = int(center_y - 16)
+            graphics.drawLine(icon_x, icon_y + 16, icon_x + 16, icon_y)
+            graphics.drawPolyline([icon_x + 8, icon_x + 16, icon_x + 16], [icon_y, icon_y, icon_y + 8], 3)
+            graphics.drawPolyline([icon_x, icon_x, icon_x + 8], [icon_y + 8, icon_y + 16, icon_y + 16], 3)
+        graphics.setClip(old_clip)
+        graphics.setStroke(BasicStroke(2.5 if pointed else 1.5))
         graphics.setColor(LOOK_ACCENT if pointed else line)
         graphics.draw(window)
-        # A badge on the picture says that it can be clicked.
-        graphics.setFont(look_font("ui_semibold", 12))
-        measure = graphics.getFontMetrics()
-        badge_wide = measure.stringWidth(PICTURE_BADGE) + 44
-        if badge_wide < 2 * radius - 30:
-            badge_left = center_x - badge_wide / 2.0
-            badge_top = center_y + radius - 46
-            badge = RoundRectangle2D.Float(badge_left, badge_top, badge_wide, 28.0, 28.0, 28.0)
-            if pointed:
-                graphics.setColor(LOOK_ACCENT)
-                graphics.fill(badge)
-                ink = LOOK_DEEP
-            else:
-                graphics.setColor(Color(LOOK_DEEP.getRed(), LOOK_DEEP.getGreen(), LOOK_DEEP.getBlue(), 225))
-                graphics.fill(badge)
-                graphics.setStroke(BasicStroke(1.0))
-                graphics.setColor(LOOK_ACCENT)
-                graphics.draw(badge)
-                ink = LOOK_ACCENT
-            graphics.setColor(ink)
-            # Two arrows pointing apart: "make this larger".
-            graphics.setStroke(BasicStroke(1.6, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND))
-            icon_x = int(badge_left + 14)
-            icon_y = int(badge_top + 9)
-            graphics.drawLine(icon_x, icon_y + 10, icon_x + 10, icon_y)
-            graphics.drawPolyline([icon_x + 5, icon_x + 10, icon_x + 10], [icon_y, icon_y, icon_y + 5], 3)
-            graphics.drawPolyline([icon_x, icon_x, icon_x + 5], [icon_y + 5, icon_y + 10, icon_y + 10], 3)
-            graphics.drawString(PICTURE_BADGE, int(badge_left + 32), int(badge_top + 19))
 
     def paint_zoom(self, graphics, width, height, text, faint):
         """All of the picture, uncropped, over the map; a click closes it."""
@@ -1641,81 +1702,85 @@ class ResultsCanvas(JPanel):
         graphics.setFont(look_font("ui_semibold", 12))
         words = "Back to the map"
         back_wide = graphics.getFontMetrics().stringWidth(words) + 30
-        back = RoundRectangle2D.Float(width - back_wide - 18.0, 16.0, float(back_wide), 28.0, 28.0, 28.0)
         graphics.setColor(LOOK_ACCENT)
-        graphics.fill(back)
+        graphics.fill(RoundRectangle2D.Float(width - back_wide - 18.0, 16.0, float(back_wide), 28.0, 28.0, 28.0))
         graphics.setColor(LOOK_DEEP)
         graphics.drawString(words, int(width - back_wide - 18 + 15), 35)
 
     def paint_regions(self, graphics, shape, text, faint, line):
-        """Right: the regions, one row per ring. The large figure is what
-        the rings show; the line under the name holds the other values."""
+        """Right, from the top: the regions, one row per ring, then what
+        can be pointed at and clicked."""
         labels, values, unit = self.ring_values()
         rows = shape["rows"]
-        if len(rows) == 0:
-            return
-        found = self.metrics()
         chosen = self.current_metric()
-        areas = self.data.get("areas", [])
-        left = rows[0][0]
-        wide = rows[0][2]
-        graphics.setFont(look_font("ui_semibold", 11))
+        left = shape["map_right"] + 4
+        wide = shape["side"] - 30
+        graphics.setFont(look_caps_font(11))
         graphics.setColor(faint)
-        paint_fitted(graphics, (chosen["name"] + " by region").upper(), left + 8, rows[0][1] - 16, wide - 8)
+        if chosen is not None:
+            paint_fitted(graphics, (chosen["name"] + " by region").upper(), left, 40, wide)
+        found = self.metrics()
+        areas = self.data.get("areas", [])
         for index in range(len(rows)):
             row_left, row_top, row_wide, row_high = rows[index]
             color = RING_COLORS[index % len(RING_COLORS)]
             if self.hover == index:
-                graphics.setColor(Color(color.getRed(), color.getGreen(), color.getBlue(), 34))
-                graphics.fill(RoundRectangle2D.Float(row_left, row_top + 2, row_wide, row_high - 4, 12.0, 12.0))
+                graphics.setColor(Color(color.getRed(), color.getGreen(), color.getBlue(), 30))
+                graphics.fill(RoundRectangle2D.Float(row_left - 10, row_top + 2, row_wide + 14, row_high - 4, 14.0, 14.0))
             graphics.setColor(line)
             graphics.setStroke(BasicStroke(1.0))
-            graphics.drawLine(int(row_left + 8), int(row_top + row_high), int(row_left + row_wide - 8), int(row_top + row_high))
+            graphics.drawLine(int(row_left), int(row_top + row_high), int(row_left + row_wide), int(row_top + row_high))
             number = values[index]
             figure = format_metric(None if number is None else number * self.progress, unit)
-            size = 24
+            size = 26
             graphics.setFont(look_font("figure", size))
             while size > 16 and graphics.getFontMetrics().stringWidth(format_metric(number, unit)) > row_wide * 0.5:
                 size -= 2
                 graphics.setFont(look_font("figure", size))
             figure_wide = graphics.getFontMetrics().stringWidth(format_metric(number, unit))
             graphics.setColor(text)
-            graphics.drawString(figure, int(row_left + row_wide - 10 - figure_wide), int(row_top + 28))
+            graphics.drawString(figure, int(row_left + row_wide - figure_wide), int(row_top + 32))
             graphics.setColor(color)
-            graphics.fillOval(int(row_left + 10), int(row_top + 15), 9, 9)
-            graphics.setFont(look_font("ui", 13))
+            graphics.fillOval(int(row_left), int(row_top + 19), 9, 9)
+            graphics.setFont(look_font("ui", 14))
             graphics.setColor(text if self.hover in (None, index) else faint)
-            paint_fitted(graphics, labels[index], row_left + 28, row_top + 25, row_wide - 28 - figure_wide - 22)
-            # The other values of this region, and its area.
+            paint_fitted(graphics, labels[index], row_left + 18, row_top + 29, row_wide - 18 - figure_wide - 14)
+            # The other values of this region, and its area: as many as fit whole.
             others = []
             for metric_index in range(len(found)):
                 if metric_index == self.metric or index >= len(found[metric_index]["values"]):
                     continue
                 other = found[metric_index]
-                word = other["short"] + (" area" if other["unit"] == "percent" else "")
-                if other["unit"] == "density":
-                    word = ""
+                word = "" if other["unit"] == "density" else other["short"] + (" area" if other["unit"] == "percent" else "")
                 others.append((word + " " + format_metric(other["values"][index], other["unit"])).strip())
             if index < len(areas) and areas[index] != "":
                 others.append(areas[index])
-            # As many of them as fit whole; none is cut short.
             graphics.setFont(look_font("ui", 11))
             graphics.setColor(faint)
             measure = graphics.getFontMetrics()
             line_text = ""
             for other_text in others:
                 longer = other_text if line_text == "" else line_text + ",  " + other_text
-                if measure.stringWidth(longer) > row_wide - 38:
+                if measure.stringWidth(longer) > row_wide - 18:
                     break
                 line_text = longer
-            graphics.drawString(line_text, int(row_left + 28), int(row_top + 46))
-        note_top = rows[-1][1] + rows[-1][3] + 24
-        if note_top < shape["height"] - 14:
-            graphics.setFont(look_font("ui", 12))
-            graphics.setColor(faint)
-            more = len(self.data.get("labels", [])) - len(rows)
-            note = "Point at a ring or a row to light up its region." if more <= 0 else str(more) + " more regions are in the tables."
-            paint_fitted(graphics, note, left + 8, note_top, wide - 8)
+            graphics.drawString(line_text, int(row_left + 18), int(row_top + 50))
+        # What can be done here, in the small capitals of the labels.
+        top = (rows[-1][1] + rows[-1][3] if len(rows) > 0 else 60) + 34
+        graphics.setFont(look_caps_font(10))
+        graphics.setColor(faint)
+        hints = ["HOVER A RING TO LIGHT UP ITS REGION"]
+        if len(self.pictures) > 0:
+            hints.append("CLICK THE PICTURE TO SEE ALL OF IT")
+        if len(shape["pills"]) > 0:
+            hints.append("CLICK A NAME ON THE LEFT TO CHANGE WHAT THE RINGS SHOW")
+        more = len(self.data.get("labels", [])) - len(rows)
+        if more > 0:
+            hints.append(str(more) + " MORE REGIONS ARE IN THE TABLES")
+        for hint in hints:
+            if top > shape["height"] - 30:
+                break
+            top = paint_wrapped(graphics, hint, left, top, wide, 16) + 10
 
 
 class RingWatcher(MouseAdapter):
@@ -2086,6 +2151,7 @@ class CellQuantStudioUniversal(JFrame):
         files of the run are unchanged; this only shows them."""
         panel = JPanel(BorderLayout(8, 8))
         self.results_canvas = ResultsCanvas()
+        self.results_canvas.on_run = self.run_analysis_action
         self.results_caption = JLabel("The latest analysis is shown here.")
         bar = JPanel(BorderLayout())
         bar.setBorder(BorderFactory.createEmptyBorder(8, 18, 0, 12))
