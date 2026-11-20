@@ -2306,14 +2306,23 @@ def step_look(ctx, t):
     launch = ns["launch_cell_quant_studio"]
     window = on_edt(launch, "opening a window", 60.0)
     settle(ctx)
-    dark = ns["look_preference"]() == ns["LOOK_DARK"]
-    if dark and state["active"]:
-        t.check(UIManager.getLookAndFeel() is not before, "the dark look is on while the window is open")
-        t.check(ns["look_is_dark"](), "and it is dark")
-        chosen = as_text(window.look_combo.getSelectedItem())
-        t.equal(chosen, "Dark", "the header shows the look in use")
+    wanted = ns["look_preference"]()
+    if state["active"]:
+        t.check(UIManager.getLookAndFeel() is not before, "the chosen look is on while the window is open")
+        t.equal(ns["look_is_dark"](), wanted == ns["LOOK_DARK"], "it is dark exactly when Dark is chosen")
+        t.equal(as_text(window.look_combo.getSelectedItem()), wanted, "the title row shows the look in use")
+        t.equal(state["name"], wanted, "the look in use is the remembered choice")
     else:
-        t.check(UIManager.getLookAndFeel() is before, "without the dark look nothing about Fiji changes")
+        t.check(UIManager.getLookAndFeel() is before, "without a look of its own nothing about Fiji changes")
+    # Text that does not fit is shortened, never drawn past its room.
+    from java.awt.image import BufferedImage
+    pen = BufferedImage(10, 10, BufferedImage.TYPE_INT_RGB).createGraphics()
+    wide = pen.getFontMetrics().stringWidth("a rather long caption for a small card")
+    t.check(0 < ns["paint_fitted"](pen, "a rather long caption for a small card", 0, 9, wide // 2) <= wide // 2,
+            "a caption that is too long is shortened to its room")
+    t.equal(ns["paint_fitted"](pen, "short", 0, 9, 500), pen.getFontMetrics().stringWidth("short"), "a caption that fits is drawn whole")
+    t.equal(ns["paint_fitted"](pen, "anything", 0, 9, 0), 0, "nothing is drawn where there is no room")
+    pen.dispose()
     on_edt(window.dispose, "closing the window")
     settle(ctx)
     wait_until(lambda: not state["active"], 10.0, "the look to be put back")
