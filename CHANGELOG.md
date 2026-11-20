@@ -63,6 +63,9 @@ Read this section before comparing new numbers with old ones.
 
 ### Fixed
 
+- **Channel settings erased by an image with fewer channels.** Opening a 1- to 3-channel image, or clicking "Use active image" on a prepared window, switched off every higher channel and set it to Ignore. The settings did not come back with the next 4-channel image, and a profile saved afterwards stored the erased values. The tabs of missing channels are still greyed out, but their settings are kept and are simply not used for that image. Folder jobs (batch, tuning, robustness) use every enabled channel whatever image is open.
+- **Validation, sensitivity and "Capture display minimum" with a Display-minimum threshold.** When the prepared image was missing or out of date, these rebuilt it and used its default display range instead of the minimum chosen in Brightness/Contrast, without any warning. They now stop with the same message as "Run analysis".
+- **Blended pixels around the label of the tissue check image on macOS.** macOS always smooths text, which left pixels between yellow and gray around the letters. The label is now drawn in plain yellow on every system. On Windows the picture is unchanged.
 - **ROI Manager disconnected after an analysis.** Hidden ROI Manager objects were closed after each run, so ImageJ lost the visible manager. The next run reported "ROI Manager contains no parent ROIs". Objects are now found without any ROI Manager.
 - **A measurement redirect set in Analyze > Set Measurements** could stop object detection; it is now saved, cleared and restored around each analysis.
 - **Non-ASCII text.** A micrometer sign or an accented file or channel name could stop loading or export. Text handling is now Unicode-safe and tables are UTF-8.
