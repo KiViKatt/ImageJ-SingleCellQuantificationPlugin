@@ -1,406 +1,484 @@
-# Cell Quant Studio
+# Cell Quant Studio Universal
 
-A Fiji/ImageJ workflow for configurable four-channel microscopy preprocessing, channel 3-based cell segmentation, and parent-ROI-guided per-cell fluorescence quantification.
+**Reproducible, validated quantification of multichannel fluorescence images in Fiji/ImageJ, built for brain organoid sections.**
 
-![Platform](https://img.shields.io/badge/platform-Fiji%20%2F%20ImageJ-2f6f9f)
-![ImageJ](https://img.shields.io/badge/ImageJ-%3E%3D%201.53-555555)
-![Languages](https://img.shields.io/badge/languages-Jython%20%7C%20ImageJ%20Macro-555555)
+Cell Quant Studio combines image preparation, independent channel segmentation and ROI-based quantification in one window. You set channel assignments, processing steps, thresholds and analysis modes in the interface, save them as a reusable settings profile, and apply the same procedure to single images or to whole folders. Every run records the exact settings, thresholds and software versions next to its results.
 
-## Overview
+It measures nuclear-object counts, marker-positive area and fluorescence intensity inside parent regions of any shape. DAPI and markers such as MAP2 are analyzed independently, so a nuclear segmentation does not decide the area measured in a non-nuclear marker channel.
 
-Cell Quant Studio combines a Jython/Swing desktop interface with two ImageJ macro-language processing stages:
+Built-in tools check the results: object counts against manual point marks, masks against reference masks, and how strongly results depend on each setting. Optional analyses add:
 
-1. **Prep** converts a four-channel image into channel-specific measurement images and a binary channel 3 segmentation mask.
-2. **Cell-based Quant** detects segmented cells within user-supplied parent ROIs, measures cell morphology, and extracts fluorescence intensity from channels 1-4.
+- an automatic tissue outline;
+- depth profiles from the organoid surface;
+- marker coverage across all thresholds;
+- tuning of settings against manual marks, scored on held-out fields;
+- error-corrected counts with uncertainty;
+- a robustness report showing whether a group difference holds across many defensible settings.
 
-The interface supports drag-and-drop image loading, active-image detection, output-folder selection, macro-path management, direct editing of both macro files, and one-click execution of Prep, Quant, or the complete sequence.
+> **Version 2.3.0.** This version has been run and tested in a real Fiji (Jython 2.7.4, ImageJ 1.54p, Java 21) and on the author's Zeiss CZI images. Upgrading from 2.2.x? Read [CHANGELOG.md](CHANGELOG.md) first: some results change on purpose. The earlier macros are kept in [legacy/](legacy/) and are not covered here.
 
-> [!IMPORTANT]
-> The current workflow is designed for exactly four channels. Channel 3 is used for segmentation and is also measured as an intensity channel.
+## Capabilities
 
-## Key capabilities
+| Area | What you can do |
+|---|---|
+| Channel configuration | Name up to eight channels and choose an analysis mode for each. |
+| Image preparation | Z-projection or a chosen Z slice; optional background subtraction, median or Gaussian filtering. |
+| Segmentation | Automatic global thresholds, manual thresholds, a captured display minimum, or local Phansalkar thresholding. |
+| Local contrast | Optional CLAHE on the segmentation copy only (measurements are never taken on it). |
+| Object separation | Binary cleanup, hole filling and watershed, with explicit settings. |
+| Quantification | Objects, marker-positive area and intensity inside ROIs of any shape. |
+| Object filtering | Area and circularity limits; exclusion of objects on the ROI outline. |
+| Batch processing | Every image of a folder with one profile, from the window or without it (headless). |
+| Validation and QC | Detection scored against manual point marks; masks compared with reference masks; parameter sensitivity. |
+| Optional analyses | Tissue outline, depth profile, threshold spectrum, auto-tuning, corrected counts, group robustness (Analyses tab). |
+| Provenance | The settings, thresholds, ImageJ version and application version are saved with every result. |
+| Figures | A companion script turns result tables into publication figures ([tools/](tools/)). |
 
-- Per-channel Max Z projection, Average Z projection, or selected-slice preparation
-- Optional rolling-ball background subtraction, median filtering, and Gaussian blur
-- Automatic or manual channel 3 thresholding
-- Configurable threshold scaling, morphology, hole filling, and watershed separation
-- Particle filtering by area and circularity within each parent ROI
-- Optional exclusion of edge-touching particles
-- Cell shape measurements: area, perimeter, circularity, Feret diameter, and bounds
-- Mean intensity and integrated density measurements for channels 1, 2, 3, and 4
-- Timestamped result folders containing CSV exports, the original parent ROI archive, and optional per-parent channel 3 mask images
-- Editable macro settings and reusable session-path files from the graphical interface
+## Analysis modes
 
-## Workflow
+Choose a mode according to the biological endpoint and the appearance of the marker.
 
-```mermaid
-flowchart LR
-    A[Four-channel microscopy image] --> B[CellQuant_01_Prep]
-    B --> C[C1-C4 measurement images]
-    B --> D[C3 binary segmentation]
-    E[Parent ROIs in ROI Manager] --> F[CellQuant_02_CellBasedQuant]
-    C --> F
-    D --> F
-    F --> G[parent_roi_summary.csv]
-    F --> H[per_cell_summary.csv]
-    F --> I[Parent ROI ZIP]
-    F --> J[Optional C3 masks]
-```
+| Mode | Purpose | Example |
+|---|---|---|
+| Ignore | Exclude the channel. | An unused channel. |
+| Intensity only | Measure fluorescence inside the ROI without finding objects. | Regional Caspase-3 signal. |
+| Positive area | Measure the area of threshold-positive signal. | MAP2-positive coverage. |
+| Objects only | Detect and measure objects after the particle filters. | SOX2-positive nuclei. |
+| Objects + area | Objects and positive area together. | DAPI nuclear count and DAPI-positive area. |
+
+An object is a segmented image component; its biological identity must be established for each experiment. A connected MAP2 component can contain processes from several neurons. It is not automatically one neuron.
 
 ## Requirements
 
-- Fiji with ImageJ version 1.53 or later
-- Fiji's Jython scripting support for the graphical launcher
-- An input image readable by the installed Fiji/ImageJ environment
-- Exactly four image channels
-- One or more parent ROIs loaded in ROI Manager before running Quant or Run All
+- Fiji with Python/Jython scripting. Tested with ImageJ 1.54p, Jython 2.7.4 and Java 21; ImageJ 1.53 or later is required.
+- Bio-Formats for proprietary formats such as CZI (included in Fiji).
+- The **Auto Local Threshold** plugin for local Phansalkar thresholding, and **Enhance Local Contrast (CLAHE)** when CLAHE is on (both included in Fiji).
+- Correct channel, Z, time and spatial-calibration metadata in the images.
+- Memory: a 4084 x 4084, 4-channel, 4-Z, 16-bit image needs about 5 GB of Java memory (Edit > Options > Memory & Threads).
 
-Fiji scripting documentation:
+## Package contents
 
-- [Scripting in ImageJ](https://imagej.net/scripting/)
-- [Jython scripting](https://imagej.net/scripting/jython/)
-- [Fiji Script Editor](https://imagej.net/scripting/script-editor)
+| File or folder | Purpose |
+|---|---|
+| `Cell_Quant_Studio_final.py` | Launcher. Run this file. |
+| `cellquantengine.py` | Analysis engine: preparation, segmentation, measurement, batch, validation. No user interface. |
+| `cellquantcore.py` | The application window. |
+| `cellquanttissue.py` | Optional: automatic tissue outline. |
+| `cellquantdepth.py` | Optional: depth profile from the ROI outline. |
+| `cellquantspectrum.py` | Optional: threshold spectrum of marker coverage. |
+| `cellquanttune.py` | Optional: tuning of settings against manual point marks. |
+| `cellquantcorrect.py` | Optional: error-corrected counts from validation data. |
+| `cellquantrobust.py` | Optional: group-level robustness across a grid of settings. |
+| `cellquant_batch_headless.py` | Folder batch from a saved profile, without the window. |
+| `tests/` | Automated tests: `run_tests.py` (engine and modules, loads every `test_*.py`), `gui_smoke.py` (the window), `run_tests.sh` and `cli_runner.py` (run them from a terminal). |
+| `tools/` | `cellquant_figures.py`: SVG figures from result tables, with its own tests. |
+| `examples/` | An example four-channel settings profile. |
+| `docs/VALIDATION.md` | How to validate a profile with the built-in tools. |
+| `docs/VALIDATION_STUDY.md` | The validation study planned for publication. |
+| `paper/` | Manuscript draft and verified references. |
+| `legacy/` | The earlier macros and launcher, unchanged. |
+| `CHANGELOG.md`, `CITATION.cff` | Release notes and citation metadata. |
 
-## Repository files
+The launcher, engine, window and every optional module check that they come from the same release, and stop with a clear message if they do not.
 
-| File | Purpose |
-| --- | --- |
-| `CellQuantStudio.py` | Jython/Swing graphical launcher and macro editor |
-| `CellQuant_01_Prep.ijm` | Four-channel preprocessing and channel 3 segmentation |
-| `CellQuant_02_CellBasedQuant.ijm` | Parent-ROI-guided particle detection and per-cell quantification |
-| `README.md` | Installation, operation, settings, outputs, and limitations |
+## Installation and launch
 
-## Installation
+1. Copy the application files (the launcher, the engine, the window file and the six `cellquant*.py` module files) into `Fiji.app/plugins/Scripts/Cell Quant Studio/`. If an older version is installed there, replace all of its files.
+2. Open `Cell_Quant_Studio_final.py` in Fiji's Script Editor.
+3. Select **Language > Python (Jython)** if needed and click **Run**.
 
-### Recommended menu installation
-
-Fiji discovers scripts placed under its `scripts` directory. For a zero-configuration installation, place the three processing files together and use the following installed names:
-
-```text
-Fiji.app/
-└── scripts/
-    └── Plugins/
-        ├── Cell_Quant_Studio.py
-        ├── CellQuant_01_Prep.ijm
-        └── CellQuant_02_Quant.ijm
-```
-
-Apply these two filename changes when copying the supplied files:
-
-```text
-CellQuantStudio.py                  -> Cell_Quant_Studio.py
-CellQuant_02_CellBasedQuant.ijm    -> CellQuant_02_Quant.ijm
-```
-
-The underscores in `Cell_Quant_Studio.py` allow Fiji to expose the launcher as **Plugins > Cell Quant Studio**. The quantification rename matches the launcher's automatic macro-path lookup. Restart Fiji or select **Help > Refresh Menus** after installing the files. Fiji also recognizes scripts under `Fiji.app/plugins/Scripts/` and its subdirectories.
-
-### Installation without renaming
-
-The original filenames can be retained. Open `CellQuantStudio.py` in Fiji's Script Editor and run it, then use the **Macro paths** tab to select:
-
-- `CellQuant_01_Prep.ijm`
-- `CellQuant_02_CellBasedQuant.ijm`
-
-The selected paths can be stored in a Cell Quant Studio session file.
+The Script Editor console lists the optional modules that were loaded. The optional modules are not required: without them the window simply has no Analyses tab.
 
 ## Quick start
 
-1. Open Fiji and launch Cell Quant Studio from the Plugins menu or Script Editor.
-2. Open the four-channel microscopy image by dragging it into the drop zone, browsing to it, or using **Detect active image** for an image already open in Fiji.
-3. Confirm that the detected image has four channels and review its dimensions, Z slices, frames, bit depth, and calibration.
-4. Open ROI Manager and load or create the parent area ROIs that define the regions to analyze.
-5. Choose an output folder. If left empty, the launcher attempts to use the input image's folder.
-6. Confirm both macro paths in the **Macro paths** tab.
-7. Review or edit processing settings in the **Prep settings** and **Quant settings** tabs.
-8. Select **Run All** to execute Prep followed by Quant, or run either stage separately.
-9. Review the timestamped run folder created inside the selected output folder.
+1. Open a representative image and confirm its channel order, Z dimensions and calibration.
+2. Launch Cell Quant Studio and select the image (drag and drop, **Browse**, or **Use active image**).
+3. Assign channel names and analysis modes on **Channels**, or load a settings profile.
+4. Choose projection and preprocessing for each enabled channel.
+5. Configure thresholding and object separation.
+6. On **ROIs and output**, choose the regions: whole image, the current selection, or parent ROIs from ROI Manager. **Detect tissue outline** on the Analyses tab can draw the organoid outline for you.
+7. Click **1. Prepare enabled channels**, then **2. Preview all masks**, and inspect the segmentation.
+8. Choose an output folder close to the drive root (for example `C:\CQ`), then click **3. Run analysis**. The analysis runs in the background; the window stays usable, and a progress bar with **Cancel** appears at the bottom.
+9. Review the tables, masks and settings together. Save the profile once it works on representative images.
 
-> [!CAUTION]
-> Running Prep or Quant saves the current editor contents back to the macro path before execution. Keep the repository under version control so parameter and code changes can be reviewed and recovered.
+A saved profile records a procedure. It does not prove the segmentation is right for every image; use the validation tools for that.
 
-## Input assumptions
+**The image you measure is the image in memory.** If its pixels were changed after opening, the window asks before preparing or measuring it, and the run log records the change. Common causes: pressing **Backspace** or **Delete** while a selection is active (this runs Edit > Clear on the shown plane) and **Apply** in Brightness/Contrast. To measure the original data, answer No and reopen the file. A prepared channel image that was edited by hand is never measured: the channel is prepared again from the source.
 
-Cell Quant Studio assumes that:
+## Batch processing
 
-- The input is a four-channel image or hyperstack.
-- All channels share the same image dimensions and coordinate system.
-- Channel 3 contains the signal used to identify cells or objects.
-- Parent ROIs are defined in full-image coordinates and align with the prepared images.
-- Particle-size and threshold settings have been validated for the image calibration and biological preparation.
+The **Batch** tab applies the current settings to every image of a folder.
 
-## Processing stages
+1. Choose the input folder and file extensions. Tick **Include subfolders** if needed.
+2. Choose the regions:
+   - **Whole image**.
+   - **ROI file per image**: a ROI Manager set saved as `<image name>_ROIs.zip` (also accepted: `_RoiSet.zip`, `_rois.zip`, `.zip`, `_ROI.roi`, `.roi`), beside the image or in a separate ROI folder. Images without a file are skipped or analyzed whole, as you choose. **Save ROI Manager set for the current image** writes the file with the right name.
+   - **Current ROI Manager set for every image**.
+   - **Automatic tissue outline** (when the tissue module is installed): the outline is detected on each image.
+3. **Scan folder** shows which files will be analyzed and which have an ROI file.
+4. **Run batch** runs in the background with a progress bar and Cancel. Finished images are kept if you cancel.
 
-### 1. Prep
+Results go to a new `CellQuant_Batch_<timestamp>` folder in the output folder:
 
-`CellQuant_01_Prep.ijm` validates the four-channel input and creates the following in-memory images:
+| File | Content |
+|---|---|
+| One run folder per image | Identical to a single-image run. |
+| `batch_roi_summary.csv`, `batch_objects.csv`, `batch_thresholds.csv` | All images combined, with `Batch_ID` and `Image_Relative_Path`. |
+| `batch_<table>.csv` | The tables of optional analyses, combined (for example `batch_depth_profile.csv`, `batch_threshold_spectrum.csv`, `batch_tissue_outline.csv`). |
+| `Tissue_Outlines/` | With the automatic outline: every detected outline and a check image, to review a whole batch quickly. |
+| `batch_report.csv` | One line per image (per series with "Analyze every series"): `OK`, `SKIPPED`, `FAILED` or `CANCELLED`, the reason, ROI source, image size, channels, calibration and time taken. |
+| `settings.properties`, `batch_log.txt` | The configuration and the log. |
 
-```text
-<base>_C1_MEAS
-<base>_C2_MEAS
-<base>_C3_MEAS
-<base>_C4_MEAS
-<base>_C3_SEG
-```
+Things to know:
 
-Each measurement channel can be processed independently. The exact supported projection mode strings are:
+- A **Display minimum** threshold is chosen by eye on one image, so a batch refuses it. Click **Capture display minimum** to turn it into a fixed Manual threshold, or use Auto or Local Phansalkar.
+- An image in which no pixel passes the threshold (a negative control, an empty field) gives zero positive area and zero objects; it does not fail.
+- **Current frame only** analyzes the first time point of each image in a batch; **All frames** analyzes every time point.
+- A file that cannot be opened, or lacks an enabled channel, is reported as `FAILED` and the batch continues.
+- Result folders written by the application are never read as input, so the output folder may be the input folder.
+- Multi-series files: the first series by default. **Analyze every series** processes each series as its own image; label, macro and thumbnail images of slide scanners are skipped and reported.
 
-| Value | Behavior |
-| --- | --- |
-| `"Max"` | Max-intensity Z projection when more than one Z slice is present |
-| `"Average"` | Average-intensity Z projection when more than one Z slice is present |
-| Any other value, normally `"Slice"` | Duplicate the configured Z slice |
+### Batch without the window (headless)
 
-After projection or slice selection, each channel can receive optional background subtraction, median filtering, and Gaussian blur.
-
-The channel 3 measurement image is duplicated for segmentation. Segmentation can use either a manual threshold or an ImageJ automatic threshold method. The lower automatic threshold can be scaled before conversion to a binary mask. Optional morphology includes Open, Close, Erode, Dilate, Fill Holes, and Watershed.
-
-### 2. Cell-based Quant
-
-`CellQuant_02_CellBasedQuant.ijm` requires the five prepared images to be open and requires the parent ROI set to be loaded in ROI Manager.
-
-For each parent ROI, the macro:
-
-1. Saves and restores the original parent ROI set.
-2. Crops the channel 3 segmentation to the parent ROI bounding box.
-3. Clears pixels outside the actual parent ROI shape.
-4. Optionally applies watershed to the cropped mask.
-5. Runs Analyze Particles using the configured area and circularity limits.
-6. Converts detected child-cell ROIs from crop-local coordinates back to full-image coordinates.
-7. Measures cell morphology on the channel 3 segmentation image.
-8. Measures mean intensity and integrated density on channels 1-4.
-9. Appends parent-level and cell-level records to CSV files.
-
-## Configuration reference
-
-### Per-channel Prep settings
-
-The same setting pattern is available for channels 1-4. Replace `N` with the channel number.
-
-| Setting | Description |
-| --- | --- |
-| `cNPrepMode` | Exact mode string: `Max`, `Average`, or a slice-mode value such as `Slice` |
-| `cNSlice` | One-based Z slice used in slice mode; values are clamped to the available Z range |
-| `cNDoSubtractBackground` | `1` enables rolling-ball background subtraction; `0` disables it |
-| `cNBgRadius` | Rolling-ball radius |
-| `cNMedianRadius` | Median-filter radius; values greater than zero enable the filter |
-| `cNGaussianSigma` | Gaussian sigma; values greater than zero enable the blur |
-
-### Channel 3 segmentation settings
-
-| Setting | Description |
-| --- | --- |
-| `c3ThresholdMethod` | ImageJ automatic threshold method, for example `Otsu` |
-| `c3ThresholdMode` | Values beginning with `dark` append ImageJ's dark-background threshold option |
-| `c3ThresholdScale` | Multiplier applied to the automatic lower threshold |
-| `c3UseManualThreshold` | `1` uses manual limits; `0` uses automatic thresholding |
-| `c3ManualLow` | Manual lower threshold |
-| `c3ManualHigh` | Manual upper threshold |
-| `c3DoOpen` | Apply binary Open |
-| `c3DoClose` | Apply binary Close |
-| `c3DoErode` | Apply binary Erode |
-| `c3DoDilate` | Apply binary Dilate |
-| `c3FillHoles` | Fill holes in binary objects |
-| `c3DoWatershed` | Apply watershed separation to the final segmentation mask |
-
-### Quantification settings
-
-| Setting | Description |
-| --- | --- |
-| `c1MeasTitle` through `c4MeasTitle` | Optional explicit prepared-window titles; empty values trigger automatic resolution |
-| `c3SegTitle` | Optional explicit channel 3 segmentation-window title |
-| `c3ParticleSizeMin` | Minimum particle area accepted by Analyze Particles |
-| `c3ParticleSizeMax` | Maximum particle area accepted by Analyze Particles |
-| `c3CircularityMin` | Minimum circularity, from 0.00 to 1.00 |
-| `c3CircularityMax` | Maximum circularity, from 0.00 to 1.00 |
-| `c3ExcludeEdgeParticles` | `1` excludes particles touching the crop boundary |
-| `c3ApplyWatershedToCrop` | `1` applies watershed separately inside each parent crop |
-| `saveParentMaskImages` | `1` saves generated channel 3 parent-mask TIFF files |
-| `decimalPlaces` | Decimal precision requested from ImageJ measurements |
-| `defaultOutputDir` | Fallback output folder when no `outputDir` argument is supplied |
-
-## Output structure
-
-Every Quant execution creates a new folder named from the sanitized image base and an ImageJ timestamp:
+`cellquant_batch_headless.py` runs the same batch from a saved profile. Open it in the Script Editor and click Run for a dialog, or run Fiji without a display. On Windows (tested):
 
 ```text
-<output-root>/
-└── <sanitized-base>_<timestamp>/
-    ├── Parent_ROIs_Input.zip
-    ├── parent_roi_summary.csv
-    ├── per_cell_summary.csv
-    └── C3_CellMasks/
-        ├── <base>_ROI_01_C3_mask.tif
-        ├── <base>_ROI_02_C3_mask.tif
-        └── ...
+fiji-windows-x64.exe --jaunch-skip-console-check --headless --console --run "C:/path/to/cellquant_batch_headless.py" 'input_dir="C:/data/images",profile="C:/data/profile.properties",output_dir="C:/CQ",roi_policy="Whole image",extensions="tif, czi",recursive=false,force_bioformats=false,all_series=false'
 ```
 
-The `C3_CellMasks` directory is created for every run. TIFF masks are written only when `saveParentMaskImages = 1` and ImageJ generates a mask window for the corresponding parent ROI.
+On Linux the launcher is `ImageJ-linux64 --ij2 --headless --console --run ...` (the name depends on the Fiji build). Keep the script beside the engine.
 
-### `Parent_ROIs_Input.zip`
+- The optional modules beside the engine are loaded too: a profile that switches on, for example, the depth profile writes `batch_depth_profile.csv` exactly as the window does.
+- `roi_policy` may be left out ("Whole image"). It also accepts "Automatic tissue outline".
+- Give every other value on the command line. Fiji otherwise reuses the value from the last run on this computer.
+- Fiji ends with exit status 0 even when the batch fails. Read the last printed line or `batch_report.csv`. On Windows the launcher shows no console output, so read `batch_log.txt`.
+- Use forward slashes in paths.
 
-A copy of the parent ROI Manager contents saved at the beginning of the run. This preserves the spatial regions used for that execution.
+## Optional analyses (Analyses tab)
 
-### `parent_roi_summary.csv`
+The six optional modules add settings to the **Analyses** tab and are saved in profiles like every other setting. They are off or unused by default. With a module off, every existing table is exactly as before. A switched-on module adds new files and new columns at the end of existing tables.
 
-One row per parent ROI, including:
+### Automatic tissue outline (`cellquanttissue.py`)
 
-- Run name, image base, and timestamp
-- Parent ROI index, generated label, and bounding box
-- Image dimensions and pixel calibration
-- Resolved measurement and segmentation window titles
-- Particle-analysis settings
-- Detected cell count
-- Total detected channel 3 particle area
-- Saved parent-mask path, when available
+Finds the outline of the tissue section, for depth profiles and for batches without hand-drawn outlines.
 
-Parent labels in the CSV are generated in processing order as `ROI_01`, `ROI_02`, and so on. Original ROI names remain available in `Parent_ROIs_Input.zip`.
+How it works:
 
-### `per_cell_summary.csv`
+1. One channel is prepared (DAPI is typical; 0 averages all analyzed channels).
+2. It is smoothed with a Gaussian of 5 micrometers.
+3. It is thresholded automatically (Triangle method, on a logarithmic intensity scale).
+4. Holes are filled, and regions smaller than 1% of the image are dropped.
 
-One row per detected cell, including:
+Each region becomes an ROI named `Tissue_001`, `Tissue_002`, and so on.
 
-- Parent ROI index and generated parent label
-- Cell index within the parent ROI
-- Run-wide global cell ID
-- Parent and cell bounding boxes
-- Coordinate fields exported as `Centroid_X` and `Centroid_Y` (see the measurement note below)
-- Area, perimeter, circularity, and Feret diameter
-- Mean intensity and integrated density for channels 1-4
+- **Window:** **Detect tissue outline into ROI Manager**.
+- **Batch:** the region policy **Automatic tissue outline**. An image without tissue is skipped, with the reason in `batch_report.csv`.
+- **Output:**
+  - `tissue_outline.csv`: threshold, settings, area, which image borders the outline touches, warnings;
+  - `ROIs/Tissue_Outline_ROIs.zip`;
+  - `Overlays/<image>_Tissue_Outline_QC.tif`.
+- **Check this:** the outline follows the smoothed image. On a synthetic section it lay about 8 micrometers (1.6 smoothing widths) outside a sharp edge. Compare a few outlines with hand-drawn ones before relying on depth near the surface; **tissue.shrink** moves the outline inward. Where the outline touches the image border, the real edge is outside the picture.
 
-> [!WARNING]
-> **Coordinate-field validation:** the current Quant macro enables ImageJ's `centroid` measurement but reads result columns `XM` and `YM` into CSV fields named `Centroid_X` and `Centroid_Y`. ImageJ uses `X` and `Y` for geometric centroid and `XM` and `YM` for center of mass. Because center-of-mass measurement is not enabled by the current `Set Measurements` command, validate or correct these two exported fields before relying on them. The other documented shape and intensity fields are read from the columns enabled by the macro.
+| Setting | Default | Meaning |
+|---|---|---|
+| `tissue.channel` | 0 | Channel to outline (0 = average of the analyzed channels). |
+| `tissue.sigma` | 5 | Smoothing in micrometers (pixels when uncalibrated). |
+| `tissue.method` | Triangle | ImageJ automatic threshold method. |
+| `tissue.log_scale` | true | Threshold on a log intensity scale. |
+| `tissue.min_area_percent` | 1 | Smallest region kept, % of the image. |
+| `tissue.largest_only` | false | Keep only the largest region. |
+| `tissue.fill_holes` | true | Fill holes (lumens become inside). |
+| `tissue.close_radius` | 0 | Close gaps up to this radius (micrometers). |
+| `tissue.shrink` | 0 | Move the outline inward (micrometers). |
+| `tissue.save_qc`, `tissue.save_rois` | true | Save the check image and the outline ROIs. |
 
-## Window lifecycle
+### Depth profile (`cellquantdepth.py`)
 
-Prep closes its internal temporary projection and slice windows but leaves the five prepared images open for Quant. The original source image is closed only when `closeSourceAfterPrep = 1` and the Prep macro opened that source from `imagePath`.
+For each parent ROI (which should be the organoid outline), pixels and objects are grouped by their distance from the outline. For each depth bin and channel it reports:
 
-Quant closes temporary parent crops and generated mask windows after each parent ROI, restores the original parent ROI set, and leaves the prepared measurement and segmentation images open.
+- area;
+- mean intensity;
+- positive-area fraction (from the same mask as `roi_summary.csv`);
+- object count and density (objects placed by the depth of their centroid).
 
-> [!WARNING]
-> **Run All depends on the five prepared images remaining open between Prep and Quant.** A Prep variant that closes all image windows at the end is not compatible with the current Run All architecture. Global image cleanup should occur only after Quant has finished and written its outputs, unless the workflow is changed to save and reopen intermediate images.
+**Outputs:**
 
-## Running macros directly
+- `depth_profile.csv`: one row per frame, ROI, channel and bin, with absolute and relative depth, where relative depth is 0 at the outline and 1 at the deepest point;
+- extra columns in `objects.csv`: each object's depth and relative depth;
+- a few summary columns in `roi_summary.csv`.
 
-The graphical launcher is optional.
+Bin areas add up to the ROI area, and bin counts add up to the ROI's object count.
 
-### Prep argument
+- The image border is not treated as surface by default: depths near a side cut by the image border are then upper bounds, and the table flags such ROIs. A whole-image ROI has no visible outline and gives a note instead of numbers.
+- Holes inside the ROI count as outline.
+- Distance-from-edge profiling is common practice (for example SCOUT for cleared whole organoids, Albanese et al. 2020). This module makes it one click for 2-D sections.
 
-Prep can process the active image or receive an image path through the macro argument string:
+| Setting | Default | Meaning |
+|---|---|---|
+| `depth.enabled` | false | Switch the depth profile on. |
+| `depth.bin_width` | 25 | Bin width in micrometers (pixels when uncalibrated). |
+| `depth.max_depth` | 0 | Deepest bin edge (0 = no limit); deeper pixels go into a final open bin. |
+| `depth.image_border_is_surface` | false | Treat the image border as outline. |
 
-```text
-imagePath=/absolute/path/to/four_channel_image.tif
-```
+### Threshold spectrum (`cellquantspectrum.py`)
 
-### Quant argument
+A positive-area fraction depends on the threshold you chose. For every positive-area channel this writes the coverage (percent of ROI pixels at or above the threshold) at evenly spaced thresholds to `threshold_spectrum.csv`. It also adds summary columns to `roi_summary.csv`:
 
-Quant can receive an output directory through the macro argument string:
+- the coverage at your threshold (equal to the positive-area fraction unless binary cleanup is configured);
+- the **sensitivity**: percentage points of coverage per 1% change of threshold;
+- the **elasticity**;
+- the **stable range**: the thresholds over which coverage stays within the tolerance, and its width;
+- the **normalized mean**: the area under the curve. This is mathematically the clipped mean intensity rescaled to 0-100%, not a new measure.
 
-```text
-outputDir=/absolute/path/to/results
-```
+Type both axis limits to put a whole batch on one axis. Cumulative threshold spectra were proposed by Johnson and Walker (2015); this is an implementation of that idea.
 
-When no output directory is supplied and `defaultOutputDir` is empty, Quant opens a folder-selection dialog.
+| Setting | Default | Meaning |
+|---|---|---|
+| `spectrum.enabled` | false | Switch the spectrum on. |
+| `spectrum.steps` | 256 | Number of threshold levels (2-4096). |
+| `spectrum.low`, `spectrum.high` | empty | Axis limits; empty = each image's own minimum and maximum. |
+| `spectrum.tolerance_percent` | 10 | Tolerance for the stable range, % of the reported coverage. |
 
-## Session files
+### Tuning from point marks (`cellquanttune.py`)
 
-**Save session** writes the graphical interface fields as `key=value` lines. A session file records image, output, and macro paths. It does not embed image data, ROI data, or complete macro source code.
+Searches chosen settings of one channel for the combination that best matches manual point marks (one click per object) over several annotated fields. It then reports how well that generalizes, by tuning on some fields and scoring the others.
 
-Macro settings are persisted by saving the editor contents to the selected `.ijm` files.
+- **Input:** a folder of images, each with `<image name>_points.zip` (or `_points.roi`) and optionally `<image name>_ROIs.zip`.
+- **Scoring:** pooled precision, recall and F1, as in the validation tab.
+- **Design:** with three or more fields, leave-one-field-out cross-validation. The held-out F1 is the number to quote; the score on all fields is labelled optimistic.
+- **Output:** a `CellQuant_Tuning_<timestamp>` folder with `tuning_grid.csv`, `tuning_field_scores.csv`, `tuning_folds.csv`, `tuning_stability.csv`, `tuning_summary.csv`, `tuning_fields.csv` and `tuned_profile.properties`.
+- **Run it:** **Run tuning...** on the Analyses tab.
+- **Prior art:** parameter optimization against annotation is established practice (Held et al. 2013; Teodoro et al. 2017).
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `tune.channel` | 0 | Channel to tune (0 = first channel that detects objects). |
+| `tune.objective` | F1 | F1, or absolute count error. |
+| `tune.search_space` | empty | Settings and values to try; empty = a default grid around the current values. |
+| `tune.factors` | 0.7, 0.85, 1.0, 1.15, 1.3 | Factors for the default grid. |
+| `tune.max_combinations` | 2000 | Refuse larger grids. |
+| `tune.group_by` | Image | Fields held out together (Image or Subfolder). |
+
+### Corrected counts (`cellquantcorrect.py`)
+
+Fits manual against detected counts from validated fields, then converts the counts of a whole table into estimated true counts with 95% prediction intervals.
+
+- **Input:** the `validation_summary.csv` files of validation runs, or a CSV with `Manual_Count` and `Detected_Count`.
+- **Fit statistics reported:** slope, intercept, their confidence intervals, residual SD, Bland-Altman bias and limits of agreement, and a leave-one-out check of whether correcting actually reduces the error. If it does not, the report says not to correct.
+- **Flags:** counts outside the calibrated range are flagged as extrapolated; negative estimates are clipped to zero and flagged.
+- **Output:** `count_calibration.csv`, `count_calibration_fit.csv`, and `<table>_corrected.csv` (the original table with corrected columns appended).
+- **Limits:** the uncertainty covers counting error only, not biological variability. A calibration is valid only for the same settings, stain and imaging, and the module warns when settings differ.
+- **Run it:** **Run count correction...**
+- **Prior art:** follows the linear calibration of automated counts used by Reynaud et al. (2012) and AxoNet (Ritch et al. 2020).
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `correct.model` | Proportional (through the origin) | Or "Line with intercept". Both fits are always reported. |
+| `correct.weighting` | None (ordinary least squares) | Or "1 / detected count", for counts whose spread grows with size. |
+
+### Group robustness (`cellquantrobust.py`)
+
+Answers whether a group difference (for example H9 against mutant) depends on one arbitrary setting. It re-segments one channel of every image over a grid of settings. For each combination it reports:
+
+- the group means;
+- the difference and ratio;
+- Hedges g;
+- Welch's t-test with a 95% confidence interval, and the Mann-Whitney test.
+
+Overall, it reports in how many combinations the direction of the difference matches the configured settings, and which values reverse it.
+
+- **Units:** measurements from the same organoid are averaged first, so statistics are computed across organoids, not images.
+- **Output:** a `CellQuant_Robustness_<timestamp>` folder with:
+  - `robustness_specifications.csv` (sorted, ready to plot as a specification curve);
+  - `robustness_summary.csv`, `robustness_units.csv`, `robustness_groups.csv`, `robustness_measurements.csv`;
+  - `group_assignment.csv`, so you can check the group of every image.
+- **Read it right:** the share of agreeing combinations is descriptive. The combinations share data and are not independent tests.
+- **Run it:** **Run robustness...** (uses the Batch tab's folder and regions).
+- **Prior art:** a multiverse or specification-curve analysis (Steegen et al. 2016; Simonsohn et al. 2020) applied to segmentation settings.
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `robust.channel` | 1 | Channel to re-segment. |
+| `robust.metric` | Object count density | Or "Positive-area fraction (percent)", "Mean object area". |
+| `robust.grid` | threshold_factor=0.8,0.9,1.0,1.1,1.2 | Settings and values to combine. |
+| `robust.max_specifications` | 60 | Refuse larger grids. |
+| `robust.group_source` | File name before the first separator | Or a regular expression, or a CSV table. |
+| `robust.separator` | _ | Separator for the file-name rule. |
+| `robust.group_regex`, `robust.unit_regex`, `robust.group_csv` | empty | Other ways to assign groups and units. |
+| `robust.control_group` | empty | Which group is the reference (A). |
+| `robust.unit_aggregation` | Mean of the measurements of the unit | Or "Pooled over the unit (sum / sum)". |
+
+## Validation and QC
+
+The **Validation and QC** tab tests one channel with its current settings, on the current frame, inside the chosen parent ROIs. See [docs/VALIDATION.md](docs/VALIDATION.md) for the procedure and [docs/VALIDATION_STUDY.md](docs/VALIDATION_STUDY.md) for the study planned for publication.
+
+**Object detection against manual marks.** Mark one point per object with the Multi-point tool (or load saved point ROIs), then click **Run validation**. Inside each parent ROI:
+
+| Outcome | Meaning |
+|---|---|
+| True positive | A detected object with at least one mark. |
+| False positive | A detected object with no mark. |
+| Missed | A mark outside every detected object. |
+| Merged | Extra marks inside one object: touching objects were joined. |
+
+Precision, recall, F1 and count error are reported per ROI and pooled, with per-object and per-mark tables. The overlay colours: green = matched, orange = merged, red = false positive, cyan = mark inside an object, magenta = missed mark.
+
+**Positive area against a reference mask.** A binary reference image of the same size (nonzero = positive) gives Dice, Jaccard, pixel precision and recall, and the area difference.
+
+**Parameter sensitivity.** The channel is re-segmented with one setting multiplied by each factor; positive area and object count are reported with their change from the configured value.
+
+## Example: SOX2, Caspase-3, MAP2, and DAPI
+
+| Channel | Marker | Analysis mode |
+|---|---|---|
+| 1 | SOX2 | Objects only |
+| 2 | Caspase-3 | Intensity only |
+| 3 | MAP2 | Positive area |
+| 4 | DAPI | Objects + area |
+
+`examples/Example_4Channel_SOX2_Casp3_MAP2_DAPI.properties` holds these assignments (channel 2 is named `Caspase3`) with placeholder thresholds. Load it with **Load settings profile** and check every threshold and filter on your own images. Profiles saved by 2.2.x load unchanged.
+
+### DAPI segmentation
+
+The DAPI workflow can use local Phansalkar thresholding with optional CLAHE, then binary cleanup and watershed. The local workflow uses an 8-bit segmentation copy. Pre-watershed and watershed masks are saved when **Save raw and final masks** is on. The pre-watershed ("raw") mask already includes the configured cleanup and hole filling.
+
+Check both missed dim nuclei and artificial splits of bright nuclei against the source channel.
+
+### Independent MAP2 analysis
+
+Use **Positive area** when the endpoint is MAP2 coverage. MAP2 is segmented from its own channel, not restricted to DAPI objects. MAP2 object count, MAP2-positive area and neuron count are different endpoints.
+
+## Brightness, contrast, and measurement intensities
+
+Display limits control how an image is shown. A display range of **1200-2000** is not a segmentation threshold. Only the **Display minimum** mode uses the lower display limit, and the value used is recorded in `thresholds.csv`. Automatic thresholds use the full data range.
+
+CLAHE works on a separate segmentation copy, never on the measured image. Background subtraction, filtering and Z-projection do change the measured values: describe measurements as coming from the prepared image.
+
+The same local-threshold settings across images apply the same algorithm, not one shared intensity cutoff.
+
+## Interpreting the outputs
+
+| Quantity | Meaning |
+|---|---|
+| Object count | Objects inside the parent ROI that pass the particle filters. |
+| Object count density | Object count divided by the ROI area. |
+| Positive area | Area of the threshold-positive ("raw") mask inside the ROI. |
+| Positive-area fraction | Positive area divided by the ROI area, also as a percentage. |
+| Mean intensity | Average prepared-image value inside the region. |
+| Integrated density | Mean times calibrated area; raw integrated density is the sum of pixel values. |
+
+**Objects and ROI outlines.** Objects are detected inside the true outline of each parent ROI, whatever its shape. An object crossing the outline is clipped there and still counted; `Touches_ROI_Edge` flags it. **Exclude objects touching ROI/image edges** removes every object with a pixel on the outline or the image border.
+
+**Per-object intensity** is measured on the object's own pixels: holes in an object, and objects lying inside those holes, are not included.
+
+Positive area and the sum of object areas can differ because watershed lines, particle filters and edge exclusion change which pixels belong to counted objects.
+
+Report units from the image calibration. `Object_Density_Per_mm2` is filled only when the unit is micrometers. Measurements on projections or single slices describe 2-D regions, not 3-D densities.
+
+## Exported results
+
+Each run creates a timestamped folder:
+
+| File or folder | Purpose |
+|---|---|
+| `roi_summary.csv` | One row per parent ROI and frame: intensity, positive area, object counts and densities. |
+| `objects.csv` | One row per object: geometry, shape, edge flag, intensity. |
+| `thresholds.csv` | Thresholds and every segmentation setting used, per channel and frame, with the application and ImageJ versions. |
+| `settings.properties` | The complete configuration; loads again as a profile. |
+| `run_log.txt` | Processing messages, including any in-memory edits of the source and shortened names. |
+| `Prepared/`, `Masks/`, `ROIs/`, `Overlays/` | Optional prepared images, masks, ROI sets and overlays. |
+| Module tables | `tissue_outline.csv`, `depth_profile.csv`, `threshold_spectrum.csv` when those modules are on. |
+
+Validation and sensitivity runs write their own `..._CellQuant_Validation_<timestamp>` and `..._CellQuant_Sensitivity_<timestamp>` folders.
+
+Tables are UTF-8 with LF line endings and no byte-order mark. In Excel, import them through **Data > From Text/CSV** and choose UTF-8 so the micrometer sign shows correctly. Columns added since 2.2 come after the 2.2 columns.
+
+**Long file names on Windows.** Most Windows programs (Explorer, Excel, Python and R scripts) cannot open a file whose full path is longer than 259 characters. Results are named after the image, so a long image name in a deep folder can exceed this. When that would happen, the result folder and the files in it use the beginning of the image name plus an 8-character code, for example `Control-day150-org1-SOX2-MAP2-DAPI-zst_1a2b3c4d_CellQuant_20261119_120000`. The full name stays in the `Source_Image` column and in `run_log.txt`. Shorter names are unchanged. Keep the output folder near the drive root.
+
+## Figures for papers
+
+[tools/cellquant_figures.py](tools/cellquant_figures.py) makes SVG figures from result tables with any Python 3, no extra packages:
+
+- Bland-Altman plots from validation runs;
+- depth profiles by group;
+- threshold spectra;
+- specification curves from a robustness run.
+
+See [tools/README.md](tools/README.md).
+
+## Reproducibility
+
+A saved profile is intended to give the same masks on any Fiji installation:
+
+- Binary open, close, erode and dilate take their iteration and neighbour counts from the profile, not from **Process > Binary > Options**. Open with N iterations is N erosions followed by N dilations.
+- The 8-bit conversion before local thresholding rescales from the image minimum to its maximum, whatever **Edit > Options > Conversions** says.
+- CLAHE and the local threshold are called through their libraries with explicit parameters.
+- Fiji's black-background, pad-edges and measurement-redirect options are set as needed and restored afterwards.
+- Objects are found without the ROI Manager, so batches also work without a display.
+- Settings are saved with every digit.
+
+## Tests
+
+The automated tests build synthetic images with known answers and check the results.
+
+- **In Fiji:** open `tests/run_tests.py` in the Script Editor, choose Python (Jython) and click Run.
+- **From a terminal (Git Bash on Windows, or Linux/macOS):**
+
+  ```text
+  bash tests/run_tests.sh /path/to/Fiji.app
+  bash tests/run_tests.sh /path/to/Fiji.app "$PWD/tests/gui_smoke.py"
+  ```
+
+  The first runs the engine and module tests (123 tests, 4296 checks, about 1 minute). The second runs the window test (28 steps); it opens windows for about half a minute.
+- **Selected tests only:** set `CELLQUANT_TEST_FILTER=word`.
+- **Large images:** set `CELLQUANT_JAVA_OPTS=-Xmx16g`.
+
+## Scope and limitations
+
+- The workflow analyzes 2-D projections or selected slices. Projection can merge structures separated along Z.
+- Thresholds, CLAHE, watershed, morphology and particle filters change counts and sizes. Check them on representative images; the sensitivity, spectrum and robustness tools measure their effect.
+- A DAPI object is nuclear signal, not automatically an identified neuron or a validated one-cell segmentation.
+- MAP2 coverage and connected objects do not measure single-neuron size or neurite length.
+- Objects from one image or organoid share a biological sample. Keep the replicate structure in statistics; the robustness module averages per unit.
+- Segmentation is threshold-based. Densely packed nuclei that watershed cannot separate are better served by learned tools (StarDist, Cellpose); the validation tab measures how well the threshold approach works on your images.
+- Images with a calibration function (for example signed 16-bit) are refused for segmentation; convert them to 32-bit first.
+- Not yet validated against manual annotation of real organoid sections; see [docs/VALIDATION_STUDY.md](docs/VALIDATION_STUDY.md).
 
 ## Troubleshooting
 
-### Quant macro path is not populated automatically
+**The launcher cannot find the application files.** Keep all application files together and launch `Cell_Quant_Studio_final.py` from the Script Editor.
 
-The supplied quantification file is named `CellQuant_02_CellBasedQuant.ijm`, while the launcher searches automatically for `CellQuant_02_Quant.ijm` or `Run.ijm`. Either:
+**A message says the files or a module are from different versions.** A file from an older package is mixed in. Replace all files with those of one release.
 
-- Select `CellQuant_02_CellBasedQuant.ijm` manually in **Macro paths**, or
-- Rename it to `CellQuant_02_Quant.ijm`.
+**"The source image has unsaved changes".** Its pixels were changed in memory after opening (often Backspace/Delete with a selection). Answer No and reopen the file to measure the original data.
 
-### Prep reports a channel-count error
+**A result file will not open in Excel or Explorer.** The path is probably longer than 259 characters. Use an output folder near the drive root.
 
-The Prep macro requires exactly four channels. Confirm that the image was opened as a four-channel hyperstack rather than as an RGB image, a single-channel stack, or separate windows.
+**"ROI Manager contains no parent ROIs".** Add at least one area ROI, use **Detect tissue outline**, or switch the region to Whole image.
 
-### Quant reports that ROI Manager is missing or empty
+**DAPI nuclei merge or dim nuclei are missed.** Inspect the source channel and both mask stages; review projection, threshold method, local radius, CLAHE, cleanup and area filters on a validation subset.
 
-Open ROI Manager and load at least one parent ROI before running Quant or Run All.
+**MAP2 results appear restricted to nuclei.** Confirm MAP2 is its own channel with **Positive area**.
 
-### Quant cannot resolve measurement or segmentation windows
+**A batch reports FAILED files.** The `Message` column of `batch_report.csv` gives the reason.
 
-Run Prep first and keep these exact prepared windows open:
+**An encoding or parser error appears before the window opens.** Run the launcher, not `cellquantcore.py`, and report the exact message with the Fiji, Java and package versions.
 
-```text
-<base>_C1_MEAS
-<base>_C2_MEAS
-<base>_C3_MEAS
-<base>_C4_MEAS
-<base>_C3_SEG
-```
+## Reporting an issue
 
-Do not rename or close them before Quant.
+Include the package version, Fiji and Java versions, operating system, image dimensions and channel/Z/time layout, bit depth, calibration, the run's `settings.properties`, and the complete error message. A small shareable test image helps.
 
-### Too few, too many, or merged cells are detected
+## Citation and licence
 
-Inspect the channel 3 segmentation and adjust:
+Citation metadata is in [CITATION.cff](CITATION.cff). Cite the version used, which is recorded in every table. A licence has not been chosen yet. Until one is added, all rights are reserved by the author.
 
-- Threshold method, mode, scale, or manual limits
-- Prep morphology and watershed
-- Quant crop-level watershed
-- Particle area range
-- Circularity range
-- Edge-particle exclusion
+## References
 
-### Intensity values are unexpected
-
-Verify channel assignments, projection modes, selected slices, image calibration, bit depth, background subtraction, and filtering settings. Compare measurements against manually selected test cells before analyzing a full experiment.
-
-## Reproducibility recommendations
-
-- Commit the `.ijm` files used for each experiment.
-- Tag software releases and record the release identifier in laboratory records.
-- Keep the generated run folder intact, including the ROI ZIP and both CSV files.
-- Validate thresholds and particle filters on representative images before batch-scale use.
-- Include positive and negative controls where biologically appropriate.
-- Review segmentation overlays or masks rather than relying on counts alone.
-- Preserve original, unmodified image data separately from analysis outputs.
-
-## Current limitations
-
-- Exactly four channels are required.
-- Segmentation is fixed to channel 3.
-- The analysis is based on 2D projected or selected-slice images.
-- Parent area ROIs must be prepared externally in ROI Manager; line and point ROIs are not appropriate inputs for the crop-and-particle workflow.
-- The interface processes one selected image at a time and does not provide a batch queue.
-- Prepared measurement images are not saved automatically.
-- The current workflow is implemented as scripts and macros rather than a compiled Java plugin or Fiji update site.
-- No automated test suite or validation dataset is included in the supplied repository files.
-- The launcher's prepared-window activation helper searches legacy suffixes rather than the current `_C1_MEAS` through `_C4_MEAS` and `_C3_SEG` names. Prep normally leaves `_C3_SEG` active, but manual Quant runs should explicitly activate a prepared image.
-- The launcher does not automatically detect the supplied `CellQuant_02_CellBasedQuant.ijm` filename unless it is selected manually or renamed to `CellQuant_02_Quant.ijm`.
-
-## Research-use notice
-
-Cell Quant Studio is intended for research image analysis. It is not a clinical diagnostic system. Users are responsible for validating segmentation, measurement settings, calibration, and statistical interpretation for their own imaging platform and biological application.
-
-## Contributing
-
-Issues and pull requests should include:
-
-- Fiji/ImageJ version
-- Operating system
-- Input image dimensions, channel count, Z slices, frames, and bit depth
-- Relevant Prep and Quant settings
-- Exact error text or a minimal reproducible example
-- A de-identified sample image when redistribution is permitted
-
-Avoid committing proprietary or identifiable microscopy data to a public repository.
-
-## Citation
-
-Suggested citation format:
-
-```text
-Ivan Khimach. 2026. Cell Quant Studio (Version 1.0.0)
-```
+- [ImageJ: Jython scripting](https://imagej.net/scripting/jython/)
+- [ImageJ: Enhance Local Contrast (CLAHE)](https://imagej.net/plugins/clahe)
+- [ImageJ: Auto Local Threshold](https://imagej.net/plugins/auto-local-threshold)
+- Full reference list with DOIs: [paper/references.md](paper/references.md)
 
 ## Acknowledgments
 
-Cell Quant Studio is built on Fiji, ImageJ, the ImageJ macro language, SciJava scripting, Jython, and Java Swing.
+Cell Quant Studio builds on Fiji, ImageJ, Jython, Java Swing, Bio-Formats, Apache Commons Math, and the Auto Local Threshold and CLAHE plugins.
