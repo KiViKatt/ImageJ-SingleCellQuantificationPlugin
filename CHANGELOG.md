@@ -2,7 +2,7 @@
 
 ## 2.3.0 (2026-11-19)
 
-Nothing was removed. Profiles saved by 2.2.x load unchanged, and every table keeps its 2.2 columns in the same order; new columns are added after them. This release was run and tested in a real Fiji (Jython 2.7.4, ImageJ 1.54p, Java 21): 123 automated engine and module tests, a 28-step automated window test, and comparisons with a 2.2 run on the author's Zeiss CZI images.
+Nothing was removed. Profiles saved by 2.2.x load unchanged, and every table keeps its 2.2 columns in the same order; new columns are added after them. This release was run and tested in a real Fiji (Jython 2.7.4, ImageJ 1.54p, Java 21): 125 automated engine and module tests, a 29-step automated window test, and comparisons with a 2.2 run on the author's Zeiss CZI images.
 
 ### Results that change compared with 2.2.x
 
