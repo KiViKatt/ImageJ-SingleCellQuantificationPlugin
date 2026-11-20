@@ -1153,6 +1153,9 @@ class CellQuantStudioUniversal(JFrame):
         text.setFont(Font("SansSerif", Font.PLAIN, 13))
         text.setText(
             "CELL QUANT STUDIO UNIVERSAL " + APP_VERSION + "\n\n"
+            "Copyright (C) 2026 Ivan Khimach. Free software under the GNU General Public License, version 3 or later "
+            "(GPL-3.0-or-later): you may share and change it under its terms. It comes with ABSOLUTELY NO WARRANTY. "
+            "See the LICENSE file of the release.\n\n"
             "Analysis modes\n"
             "- Intensity only: reports area, mean, standard deviation, minimum, maximum, median, integrated density, and raw integrated density inside each parent ROI.\n"
             "- Positive area: independently thresholds the channel and reports positive area and positive-area fraction/density.\n"
