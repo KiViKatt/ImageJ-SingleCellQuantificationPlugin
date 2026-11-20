@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Ivan Khimach
+
 # Cell Quant Studio Universal - tests of the error-corrected counts
 # (cellquantcorrect.py)
 #

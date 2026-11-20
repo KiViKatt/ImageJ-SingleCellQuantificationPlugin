@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Ivan Khimach
+
 # Cell Quant Studio Universal - tuning of segmentation settings from manual
 # point marks, with held-out scoring (optional module)
 #

@@ -146,11 +146,11 @@ For new features: engine or module function first with a known-answer test, then
 
 - Literature check (2026-11-18): every module has prior art, and `paper/references.md` cites it. The most defensible contribution is the combination in one auditable Fiji tool of validation against manual points, calibrated counts, full provenance and a routine robustness (multiverse) report.
 - The substance must come from validation on real organoid images (`docs/VALIDATION_STUDY.md`): 40-60 fields, two blind annotators, StarDist and Cellpose comparison, Bland-Altman, ICC, F1.
-- Venues: F1000Research Software Tool Article or JORS after a licence and a Zenodo DOI. eNeuro "Open Source Tools and Methods" after validation. JOSS needs about 6 months of public history.
+- Venues: F1000Research Software Tool Article or JORS after a Zenodo DOI. eNeuro "Open Source Tools and Methods" after validation. JOSS needs about 6 months of public history.
 
 ## Open decisions for the owner
 
-- **Licence.** None yet (MIT or BSD-3-Clause are common). Then add `LICENSE` and the `license:` line in `CITATION.cff`.
+- **Licence: decided 2026-11-20, GPL-3.0-or-later** (`LICENSE`, `license:` in `CITATION.cff`, an SPDX header in every source file). Chosen to match the Fiji ecosystem and keep the option of selling separate commercial licences later, which needs the owner to hold all copyright (so outside contributions would need a contributor agreement). Every new source file gets the same two-line header.
 - **Demo profile.** The owner's own demo profile was never added to `examples/`.
 - **MAP2 threshold.** The main preset uses a by-eye Display minimum. Capture a fixed Manual value, or validate between two raters.
 - **Old data.** Re-run 2.2.x counts made with non-rectangular ROIs, and the 2026-11-18 org1-ROI1 run.

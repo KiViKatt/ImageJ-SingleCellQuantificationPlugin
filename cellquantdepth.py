@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Ivan Khimach
+
 # Cell Quant Studio Universal - depth profile from the ROI outline (optional module)
 #
 # Brain organoids are layered from the surface inward. When the parent ROI is

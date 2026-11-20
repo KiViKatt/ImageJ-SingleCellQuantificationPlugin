@@ -1,6 +1,5 @@
 # Citation metadata for Cell Quant Studio Universal.
-# Add a "license:" line with the SPDX identifier once a license is chosen,
-# and a "doi:" line once the release has been archived (for example on Zenodo).
+# Add a "doi:" line once the release has been archived (for example on Zenodo).
 cff-version: 1.2.0
 message: "If you use this software, please cite it using the metadata below."
 title: "Cell Quant Studio Universal"
@@ -17,6 +16,7 @@ authors:
   - family-names: "Khimach"
     given-names: "Ivan"
 repository-code: "https://github.com/KiViKatt/ImageJ-SingleCellQuantificationPlugin"
+license: GPL-3.0-or-later
 keywords:
   - "ImageJ"
   - "Fiji"

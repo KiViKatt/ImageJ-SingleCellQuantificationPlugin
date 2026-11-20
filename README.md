@@ -470,7 +470,11 @@ Include the package version, Fiji and Java versions, operating system, image dim
 
 ## Citation and licence
 
-Citation metadata is in [CITATION.cff](CITATION.cff). Cite the version used, which is recorded in every table. A licence has not been chosen yet. Until one is added, all rights are reserved by the author.
+Citation metadata is in [CITATION.cff](CITATION.cff). Cite the version used, which is recorded in every table.
+
+Cell Quant Studio is free software, released under the [GNU General Public License, version 3 or later](LICENSE) (GPL-3.0-or-later). You may use, study, change and share it. If you distribute it, or a modified version, you must do so under the same licence and make the source code available. It comes with no warranty. The files in [legacy/](legacy/) are the author's earlier macros and are covered by the same licence.
+
+For other licensing terms (for example, use inside a closed-source product), contact the author.
 
 ## References
 

@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Ivan Khimach
+
 # Cell Quant Studio Universal - analysis engine
 #
 # Image preparation, independent channel segmentation, ROI-based measurement,
