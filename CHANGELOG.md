@@ -2,7 +2,7 @@
 
 ## 2.3.0 (2026-11-19)
 
-Nothing was removed. Profiles saved by 2.2.x load unchanged, and every table keeps its 2.2 columns in the same order; new columns are added after them. This release was run and tested in a real Fiji (Jython 2.7.4, ImageJ 1.54p, Java 21): 125 automated engine and module tests, a 29-step automated window test, and comparisons with a 2.2 run on the author's Zeiss CZI images.
+Nothing was removed. Profiles saved by 2.2.x load unchanged, and every table keeps its 2.2 columns in the same order; new columns are added after them. This release was run and tested in a real Fiji (Jython 2.7.4, ImageJ 1.54p, Java 21): 125 automated engine and module tests, a 30-step automated window test, and comparisons with a 2.2 run on the author's Zeiss CZI images.
 
 ### Results that change compared with 2.2.x
 
@@ -29,6 +29,8 @@ Read this section before comparing new numbers with old ones.
 
 ### Added
 
+- **Results tab.** After an analysis the window shows headline numbers (object counts, positive-area share), a chart of the object counts per parent ROI, and the object overlay image. It reads the summary table of the run; no table, file or number changes.
+- **Dark look**, with a banner and highlighted workflow buttons. It uses Fiji's FlatLaf dark theme, which applies to all Fiji windows while Cell Quant Studio is open; the previous look is put back when the window closes. **Look > Fiji default** in the banner switches it off, and the choice is remembered. Without FlatLaf the window keeps Fiji's look.
 - **Optional analysis modules**, each in its own file, with settings saved in profiles and a new **Analyses** tab. With a module off, every table is byte-for-byte unchanged (tested).
   - `cellquanttissue.py`: automatic tissue outline (Gaussian smoothing in micrometers, automatic threshold on a log scale, hole filling, region-size filter); window button and the batch region policy "Automatic tissue outline"; `tissue_outline.csv`, outline ROIs and a check image; `Tissue_Outlines/` in batches.
   - `cellquantdepth.py`: depth profile from the ROI outline (`depth_profile.csv`; object depth columns in `objects.csv`).

@@ -26,6 +26,7 @@ from java.awt import Polygon, Window, Dialog, Component
 from java.awt.event import ActionListener
 from java.io import FileOutputStream
 from java.lang import Runnable, Thread as JavaThread, Throwable as JavaThrowable
+from javax.swing import UIManager
 from javax.swing import SwingUtilities, JOptionPane, JFileChooser, JButton, JFrame, JPanel, JCheckBox, JComboBox, JTextField
 from javax.swing import Timer as SwingTimer
 from javax.swing.border import TitledBorder
@@ -56,7 +57,7 @@ DISKS = [
 MARKER_OUTER = (40, 50, 100, 80)
 MARKER_INNER = (60, 70, 60, 40)
 RECT = (10, 10, 220, 180)
-TAB_TITLES = ["Session", "Channels", "ROIs and output", "Batch", "Validation and QC", "Analyses", "Help"]
+TAB_TITLES = ["Session", "Results", "Channels", "ROIs and output", "Batch", "Validation and QC", "Analyses", "Help"]
 TAB_TITLES_NO_MODULES = ["Session", "Channels", "ROIs and output", "Batch", "Validation and QC", "Help"]
 ACTION_TIMEOUT = 90.0
 
@@ -824,6 +825,26 @@ def step_run_analysis(ctx, t):
     for image_id in ctx.prepared_ids:
         t.check(WindowManager.getImage(image_id) is not None, "prepared images stay open after the analysis")
 
+    # The Results tab shows the same run: its numbers come from the summary table.
+    tabs = app.main_tabs
+    t.equal(as_text(tabs.getTitleAt(tabs.getSelectedIndex())), "Results", "the Results tab comes to the front after an analysis")
+    shown = app.results_canvas.data
+    t.equal(shown["regions"], 2, "the Results tab covers both parent ROIs")
+    counted = sum([int(row.get("C1_DAPI_Object_Count", "0")) for row in window["summary"][1]])
+    count_tiles = [tile for tile in shown["tiles"] if tile["kind"] == "count"]
+    t.equal([(tile["title"], tile["value"]) for tile in count_tiles], [("DAPI objects", float(counted))],
+            "the object tile is the sum of the summary table")
+    positive = sum([float(row.get("C2_MAP2_Positive_Area")) for row in window["summary"][1]])
+    measured = sum([float(row.get("ROI_Area")) for row in window["summary"][1]])
+    marker_tiles = [tile for tile in shown["tiles"] if tile["title"] == "MAP2 positive area"]
+    t.equal(len(marker_tiles), 1, "one positive-area tile for the marker")
+    if len(marker_tiles) == 1:
+        t.close(marker_tiles[0]["value"], positive / measured * 100.0, "the marker tile is positive area over measured area")
+    t.equal(shown["bars"]["labels"], [row.get("Parent_ROI_Name") for row in window["summary"][1]], "one group of bars per parent ROI")
+    t.equal(len(app.results_canvas.pictures), 1, "the object overlay of the run is shown")
+    t.equal(as_text(tabs.getTitleAt(0)), "Session", "the Session tab is still the first one")
+    on_edt(lambda: tabs.setSelectedIndex(0), "back to the Session tab")
+
 
 def step_second_image(ctx, t):
     """A second image, analyzed from a script thread, without touching ROI Manager."""
@@ -1430,7 +1451,7 @@ def step_batch(ctx, t):
         app.batch_extensions_field.setText("tif")
         app.batch_roi_combo.setSelectedItem(E.BATCH_ROI_WHOLE)
         app.output_dir_field.setText(ctx.out_dir)
-        app.main_tabs.setSelectedIndex(3)
+        app.main_tabs.setSelectedIndex(TAB_TITLES.index("Batch"))
 
     on_edt(setup, "filling the Batch tab")
     click(ctx, "Scan folder")
@@ -2254,6 +2275,48 @@ def step_fewer_channels(ctx, t):
         settle(ctx)
 
 
+def step_look(ctx, t):
+    """The dark look applies to the whole of Fiji, so it must be gone again
+    once the window has closed; and the small helpers of the Results tab."""
+    ns = ctx.ns
+    t.equal(ns["format_count"](1234567.4), "1,234,567", "counts are written with thousands separators")
+    t.equal(ns["format_count"](12), "12", "a small count is left alone")
+    headers = ["Parent_ROI_Name", "ROI_Area", "C1_A_Object_Count", "C1_A_Edge_Touching_Object_Count",
+               "C2_B_Positive_Area", "C2_B_Positive_Area_Fraction_Percent"]
+    rows = [
+        {"Parent_ROI_Name": "one", "ROI_Area": 100.0, "C1_A_Object_Count": 3, "C1_A_Edge_Touching_Object_Count": 1,
+         "C2_B_Positive_Area": 10.0, "C2_B_Positive_Area_Fraction_Percent": 10.0},
+        {"Parent_ROI_Name": "two", "ROI_Area": 300.0, "C1_A_Object_Count": 5, "C1_A_Edge_Touching_Object_Count": 0,
+         "C2_B_Positive_Area": 150.0, "C2_B_Positive_Area_Fraction_Percent": 50.0}
+    ]
+    shown = ns["results_from_summary"](headers, rows, [])
+    t.equal([(tile["title"], tile["kind"], tile["value"]) for tile in shown["tiles"]],
+            [("A objects", "count", 8.0), ("B positive area", "percent", 40.0)],
+            "counts are added up, fractions are weighted by area, edge counts get no tile")
+    t.equal(ns["results_from_summary"]([], [], [])["tiles"], [], "an empty table gives an empty Results tab")
+    t.equal(ns["results_pictures"](os.path.join(ctx.out_dir, "no such run")), [], "a run without overlays shows no picture")
+
+    before = UIManager.getLookAndFeel()
+    state = ns["LOOK_STATE"]
+    t.check(not state["active"], "no look is switched on while no window is open")
+    launch = ns["launch_cell_quant_studio"]
+    window = on_edt(launch, "opening a window", 60.0)
+    settle(ctx)
+    dark = ns["look_preference"]() == ns["LOOK_DARK"]
+    if dark and state["active"]:
+        t.check(UIManager.getLookAndFeel() is not before, "the dark look is on while the window is open")
+        t.check(ns["look_is_dark"](), "and it is dark")
+        chosen = as_text(window.look_combo.getSelectedItem())
+        t.equal(chosen, "Dark", "the header shows the look in use")
+    else:
+        t.check(UIManager.getLookAndFeel() is before, "without the dark look nothing about Fiji changes")
+    on_edt(window.dispose, "closing the window")
+    settle(ctx)
+    wait_until(lambda: not state["active"], 10.0, "the look to be put back")
+    t.check(UIManager.getLookAndFeel() is before, "Fiji has its own look again after the window closed")
+    expect_dialogs(ctx, t, [], "switching the look")
+
+
 def step_source_rules(ctx, t):
     for name in ["cellquantcore.py", "Cell_Quant_Studio_final.py"]:
         handle = open(os.path.join(ctx.repo, name), "rb")
@@ -2297,6 +2360,7 @@ STEPS = [
     ("ROI, cleanup, and reset actions", step_other_actions),
     ("close and relaunch", step_relaunch),
     ("an image with fewer channels keeps the other channels' settings", step_fewer_channels),
+    ("the dark look is put back; Results tab helpers", step_look),
     ("source rules", step_source_rules)
 ]
 
