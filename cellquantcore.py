@@ -35,6 +35,10 @@ from javax.swing import (
     JProgressBar, BoxLayout, BorderFactory, SwingUtilities, UIManager, Box
 )
 from javax.swing import Timer as SwingTimer
+from javax.swing import JViewport, SwingConstants
+from javax.swing.plaf.basic import BasicHTML
+from javax.swing.text import View
+from java.awt import LayoutManager
 from java.awt import (
     BorderLayout, GridBagLayout, GridBagConstraints, Insets, Dimension, Font,
     Color, FlowLayout, Cursor, Window, RenderingHints, GradientPaint, BasicStroke
@@ -50,6 +54,7 @@ from java.io import File
 from java.lang import Runnable
 
 import os
+import math
 import time
 import traceback
 import threading
@@ -538,10 +543,11 @@ LOOK_EXTRAS = [
     ("TabbedPane.tabHeight", "34"),
     ("TabbedPane.showTabSeparators", "false"),
     ("SplitPane.dividerSize", "10"),
-    ("TitledBorder.titleColor", "#8e8e93")
+    ("TitledBorder.titleColor", "#8e8e93"),
+    ("TitledBorder.position", "ABOVE_TOP")
 ]
 # The outline of a titled group: one hairline with round corners.
-LOOK_GROUP_BORDER = {LOOK_DARK: "1,1,1,1,#3a3a3c,1,12", LOOK_LIGHT: "1,1,1,1,#d1d1d6,1,12"}
+LOOK_GROUP_BORDER = {LOOK_DARK: "8,10,10,10,#3a3a3c,1,12", LOOK_LIGHT: "8,10,10,10,#d1d1d6,1,12"}
 CHANNEL_SWATCHES = {
     "Blue": Color(10, 132, 255), "Green": Color(48, 209, 88), "Red": Color(255, 69, 58),
     "Magenta": Color(191, 90, 242), "Cyan": Color(100, 210, 255), "Yellow": Color(255, 214, 10)
@@ -656,10 +662,10 @@ def style_button(button, kind="plain"):
             button.putClientProperty(
                 "FlatLaf.style",
                 "background: #0a84ff; hoverBackground: #2b95ff; pressedBackground: #0071e3; "
-                "foreground: #ffffff; borderWidth: 0; font: bold; margin: 5,18,5,18"
+                "foreground: #ffffff; borderWidth: 0; margin: 5,14,5,14"
             )
         else:
-            button.putClientProperty("FlatLaf.style", "margin: 5,12,5,12")
+            button.putClientProperty("FlatLaf.style", "margin: 5,14,5,14")
     except ANY_ERROR:
         pass
     return button
@@ -1059,8 +1065,19 @@ class DropZonePanel(JPanel):
         graphics.draw(RoundRectangle2D.Float(4.0, 8.0, width - 12.0, height - 12.0, CARD_ARC, CARD_ARC))
         graphics.clipRect(14, 14, max(0, width - 32), max(0, height - 24))
         center = width // 2
-        block = 150 + 24 * len(self.STEPS)
-        top = max(24, (height - block) // 2)
+        base = self.getFont()
+        if height < 170:
+            # A low zone: the headline alone, in the middle. Never a cut-off part.
+            graphics.setFont(base.deriveFont(Font.BOLD, 15.0))
+            graphics.setColor(text)
+            headline = "Drop a microscopy image here"
+            shown_width = min(graphics.getFontMetrics().stringWidth(headline), width - 40)
+            paint_fitted(graphics, headline, center - shown_width // 2, height // 2 + 6, width - 40)
+            return
+        block = 136 + 22 * len(self.STEPS)
+        if height < block + 44:
+            block = 110
+        top = max(22, (height - block) // 2)
         # An arrow into a tray.
         graphics.setStroke(BasicStroke(2.5, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND))
         graphics.setColor(LOOK_ACCENT)
@@ -1086,8 +1103,9 @@ class DropZonePanel(JPanel):
         widest = min(widest, width - 80)
         left = center - (widest + 30) // 2
         for index in range(len(self.STEPS)):
-            line = top + 146 + 24 * index
-            if line > height - 20:
+            line = top + 144 + 22 * index
+            if top + 144 + 22 * (len(self.STEPS) - 1) > height - 22:
+                # Not room for the whole list: none of it, never a part.
                 break
             graphics.setColor(look_mix(back, text, 0.12))
             graphics.fillOval(left, line - 14, 20, 20)
@@ -1333,6 +1351,166 @@ class LookWindowListener(WindowAdapter):
 
 
 # -----------------------------------------------------------------------------
+# One layout for every tab
+# -----------------------------------------------------------------------------
+#
+# The tabs are built row by row with their own grids. tidy_tab() then gives
+# all of them the same shape: the content sits in one centered column of a
+# fixed largest width, every label column of a tab has one width with its
+# labels right-aligned (long labels wrap), buttons in a row have one size,
+# and a form in a scrolling area starts at the top.
+
+CONTENT_WIDTH = 1040
+FORM_LABEL_CAP = 240
+FORM_HINT_CAP = 250
+BUTTON_ROW_LIMIT = 980
+
+
+class ColumnLayout(LayoutManager):
+    """Gives the one child the full height and at most `limit` pixels of
+    width, centered."""
+
+    def __init__(self, limit):
+        self.limit = limit
+
+    def addLayoutComponent(self, name, component):
+        pass
+
+    def removeLayoutComponent(self, component):
+        pass
+
+    def preferredLayoutSize(self, parent):
+        if parent.getComponentCount() == 0:
+            return Dimension(0, 0)
+        wanted = parent.getComponent(0).getPreferredSize()
+        return Dimension(min(wanted.width, self.limit), wanted.height)
+
+    def minimumLayoutSize(self, parent):
+        if parent.getComponentCount() == 0:
+            return Dimension(0, 0)
+        wanted = parent.getComponent(0).getMinimumSize()
+        return Dimension(min(wanted.width, self.limit), wanted.height)
+
+    def layoutContainer(self, parent):
+        if parent.getComponentCount() == 0:
+            return
+        width = min(parent.getWidth(), self.limit)
+        parent.getComponent(0).setBounds((parent.getWidth() - width) // 2, 0, width, parent.getHeight())
+
+
+def in_column(component):
+    """The component in a centered column of at most CONTENT_WIDTH pixels."""
+    holder = JPanel(ColumnLayout(CONTENT_WIDTH))
+    holder.add(component)
+    return holder
+
+
+def html_text(text):
+    text = to_text(text)
+    for pair in [("&", "&amp;"), ("<", "&lt;"), (">", "&gt;")]:
+        text = text.replace(pair[0], pair[1])
+    return text
+
+
+def tidy_collect(container, grids, rows, notes):
+    for child in container.getComponents():
+        if isinstance(child, JPanel):
+            layout = child.getLayout()
+            if isinstance(layout, GridBagLayout):
+                grids.append(child)
+            elif isinstance(layout, FlowLayout):
+                rows.append(child)
+        elif isinstance(child, JTextArea) and not child.isEditable() and not child.isOpaque():
+            notes.append(child)
+        if hasattr(child, "getComponents"):
+            tidy_collect(child, grids, rows, notes)
+
+
+def tidy_tab(tab):
+    """Give the forms and button rows of one tab one consistent shape."""
+    grids = []
+    rows = []
+    notes = []
+    tidy_collect(tab, grids, rows, notes)
+
+    # Label columns: one width for the whole tab, right-aligned.
+    labels = []
+    widest = 0
+    for panel in grids:
+        layout = panel.getLayout()
+        for child in panel.getComponents():
+            constraints = layout.getConstraints(child)
+            if isinstance(child, JLabel) and constraints.gridx == 0 and constraints.gridwidth == 1:
+                labels.append((layout, child, constraints))
+                widest = max(widest, child.getPreferredSize().width)
+            elif isinstance(child, JLabel) and constraints.gridx >= 2:
+                # A hint behind a field: secondary text, wrapped when long so
+                # that it never forces the form wider than its column.
+                child.putClientProperty("FlatLaf.style", "foreground: $Label.disabledForeground")
+                hint_size = child.getPreferredSize()
+                if hint_size.width > FORM_HINT_CAP:
+                    child.setText("<html>" + html_text(child.getText()) + "</html>")
+                    hint_view = child.getClientProperty(BasicHTML.propertyKey)
+                    if hint_view is not None:
+                        hint_view.setSize(float(FORM_HINT_CAP), 0.0)
+                        child.setPreferredSize(Dimension(
+                            FORM_HINT_CAP, int(math.ceil(hint_view.getPreferredSpan(View.Y_AXIS)))
+                        ))
+            elif isinstance(child, JButton) and constraints.gridx >= 2:
+                # Buttons behind fields (Browse, Apply preset): one width per form.
+                constraints.fill = GridBagConstraints.HORIZONTAL
+                layout.setConstraints(child, constraints)
+    width = min(widest, FORM_LABEL_CAP)
+    for entry in labels:
+        layout, label, constraints = entry
+        wanted = label.getPreferredSize()
+        height = wanted.height
+        if wanted.width > width:
+            # Too long for the column: wrap it instead of widening the column.
+            label.setText("<html><div style='text-align: right'>" + html_text(label.getText()) + "</div></html>")
+            view = label.getClientProperty(BasicHTML.propertyKey)
+            if view is not None:
+                view.setSize(float(width), 0.0)
+                height = int(math.ceil(view.getPreferredSpan(View.Y_AXIS)))
+        label.setPreferredSize(Dimension(width, height))
+        label.setMinimumSize(Dimension(width, height))
+        label.setHorizontalAlignment(SwingConstants.RIGHT)
+        constraints.anchor = GridBagConstraints.EAST
+        constraints.fill = GridBagConstraints.NONE
+        constraints.insets = Insets(5, 8, 5, 4)
+        layout.setConstraints(label, constraints)
+
+    # A form inside a scrolling area starts at the top instead of floating
+    # in the middle of the free space.
+    for panel in grids:
+        if isinstance(panel.getParent(), JViewport):
+            filler = GridBagConstraints()
+            filler.gridx = 0
+            filler.gridy = 1000
+            filler.weighty = 1.0
+            filler.fill = GridBagConstraints.VERTICAL
+            panel.add(Box.createVerticalGlue(), filler)
+
+    # Button rows: every button of a row has the size of the largest one,
+    # unless the row would then no longer fit.
+    for panel in rows:
+        buttons = [child for child in panel.getComponents() if isinstance(child, JButton)]
+        if len(buttons) == 0:
+            continue
+        layout = panel.getLayout()
+        layout.setHgap(8)
+        high = max([button.getPreferredSize().height for button in buttons])
+        wide = max([button.getPreferredSize().width for button in buttons])
+        even = len(buttons) >= 2 and (wide + 8) * len(buttons) <= BUTTON_ROW_LIMIT
+        for button in buttons:
+            button.setPreferredSize(Dimension(wide if even else button.getPreferredSize().width, high))
+
+    # Explanations: secondary text.
+    for note in notes:
+        note.putClientProperty("FlatLaf.style", "foreground: $Label.disabledForeground")
+
+
+# -----------------------------------------------------------------------------
 # Main application
 # -----------------------------------------------------------------------------
 
@@ -1397,18 +1575,20 @@ class CellQuantStudioUniversal(JFrame):
         self.main_tabs = JTabbedPane()
         self.main_tabs.add("Session", self.build_session_tab())
         self.main_tabs.add(RESULTS_TAB_TITLE, self.build_results_tab())
-        self.main_tabs.add("Channels", self.build_channels_tab())
-        self.main_tabs.add("ROIs and output", self.build_roi_output_tab())
-        self.main_tabs.add("Batch", self.build_batch_tab())
-        self.main_tabs.add("Validation and QC", self.build_validation_tab())
+        self.main_tabs.add("Channels", in_column(self.build_channels_tab()))
+        self.main_tabs.add("ROIs and output", in_column(self.build_roi_output_tab()))
+        self.main_tabs.add("Batch", in_column(self.build_batch_tab()))
+        self.main_tabs.add("Validation and QC", in_column(self.build_validation_tab()))
         if len(SETTINGS_FORMS) > 0:
-            self.main_tabs.add("Analyses", self.build_analyses_tab())
-        self.main_tabs.add("Help", self.build_help_tab())
+            self.main_tabs.add("Analyses", in_column(self.build_analyses_tab()))
+        self.main_tabs.add("Help", in_column(self.build_help_tab()))
         root.add(self.main_tabs, BorderLayout.CENTER)
         root.add(self.build_job_bar(), BorderLayout.SOUTH)
 
         self.getContentPane().add(root)
         self.style_buttons(root)
+        for tab_index in range(self.main_tabs.getTabCount()):
+            tidy_tab(self.main_tabs.getComponentAt(tab_index))
 
     def build_header(self):
         """The title row: name, one line on what the tool does, and the look."""
@@ -1510,9 +1690,11 @@ class CellQuantStudioUniversal(JFrame):
         bar = JPanel(FlowLayout(FlowLayout.LEFT))
         self.job_label = JLabel("No background job is running.")
         self.job_progress = JProgressBar(0, 100)
-        self.job_progress.setStringPainted(True)
+        # A thin bar; what it stands for is written beside it (job_label).
+        # The string is still set, for scripts and tests that read the state.
+        self.job_progress.setStringPainted(False)
         self.job_progress.setString("Idle")
-        self.job_progress.setPreferredSize(Dimension(320, 20))
+        self.job_progress.setPreferredSize(Dimension(220, 6))
         self.job_cancel_button = JButton("Cancel", actionPerformed=self.cancel_background_action)
         self.job_cancel_button.setEnabled(False)
         bar.add(self.job_progress)
@@ -1567,20 +1749,26 @@ class CellQuantStudioUniversal(JFrame):
         )
         self.add_grid_row(inputs, 3, "Frames", self.frame_mode_combo)
 
-        actions = JPanel(FlowLayout(FlowLayout.LEFT))
+        # Two rows: getting an image, then the three steps of an analysis.
+        image_row = JPanel(FlowLayout(FlowLayout.LEFT, 8, 4))
+        image_row.add(JButton("Open selected image", actionPerformed=self.open_selected_image))
+        image_row.add(JButton("Open via Bio-Formats", actionPerformed=self.open_selected_with_bioformats))
+        image_row.add(JButton("Use active image", actionPerformed=self.use_active_image))
+        image_row.add(JButton("Reset for next image", actionPerformed=self.reset_for_next_image))
+        steps_row = JPanel(FlowLayout(FlowLayout.LEFT, 8, 4))
+        steps_row.add(style_button(JButton("1. Prepare enabled channels", actionPerformed=self.prepare_enabled_channels)))
+        steps_row.add(style_button(JButton("2. Preview all masks", actionPerformed=self.preview_all_masks)))
+        steps_row.add(style_button(JButton("3. Run analysis", actionPerformed=self.run_analysis_action), "primary"))
+        steps_row.add(JButton("Quick run", actionPerformed=self.quick_run_action))
+        actions = JPanel()
+        actions.setLayout(BoxLayout(actions, BoxLayout.Y_AXIS))
         actions.setBorder(BorderFactory.createTitledBorder("Workflow actions"))
-        actions.add(JButton("Open selected image", actionPerformed=self.open_selected_image))
-        actions.add(JButton("Open via Bio-Formats", actionPerformed=self.open_selected_with_bioformats))
-        actions.add(JButton("Use active image", actionPerformed=self.use_active_image))
-        actions.add(style_button(JButton("1. Prepare enabled channels", actionPerformed=self.prepare_enabled_channels)))
-        actions.add(style_button(JButton("2. Preview all masks", actionPerformed=self.preview_all_masks)))
-        actions.add(style_button(JButton("3. Run analysis", actionPerformed=self.run_analysis_action), "primary"))
-        actions.add(JButton("Quick run", actionPerformed=self.quick_run_action))
-        actions.add(JButton("Reset for next image", actionPerformed=self.reset_for_next_image))
+        actions.add(image_row)
+        actions.add(steps_row)
 
         self.drop_area = DropZonePanel()
-        self.drop_area.setPreferredSize(Dimension(520, 260))
-        self.drop_area.setMinimumSize(Dimension(380, 200))
+        self.drop_area.setPreferredSize(Dimension(520, 230))
+        self.drop_area.setMinimumSize(Dimension(320, 120))
         self.drop_area.setToolTipText(
             "Recommended manual-threshold workflow: open an image and apply a preset; prepare the enabled channels; "
             "use each channel's Brightness/Contrast button; preview masks and adjust thresholds/morphology; "
@@ -1618,8 +1806,14 @@ class CellQuantStudioUniversal(JFrame):
         top.add(inputs, BorderLayout.NORTH)
         top.add(actions, BorderLayout.SOUTH)
 
-        split = JSplitPane(JSplitPane.VERTICAL_SPLIT, center, JScrollPane(self.status_area))
-        split.setResizeWeight(0.57)
+        # The log keeps a few lines even in the smallest window.
+        status_scroll = JScrollPane(self.status_area)
+        status_scroll.setMinimumSize(Dimension(200, 96))
+        status_scroll.setPreferredSize(Dimension(600, 150))
+        source_panel.setMinimumSize(Dimension(320, 120))
+        center.setMinimumSize(Dimension(400, 130))
+        split = JSplitPane(JSplitPane.VERTICAL_SPLIT, center, status_scroll)
+        split.setResizeWeight(0.7)
 
         panel.add(top, BorderLayout.NORTH)
         panel.add(split, BorderLayout.CENTER)
@@ -1778,7 +1972,7 @@ class CellQuantStudioUniversal(JFrame):
         self.batch_progress = JProgressBar(0, 100)
         self.batch_progress.setStringPainted(True)
         self.batch_progress.setString("Idle")
-        self.batch_progress.setPreferredSize(Dimension(420, 22))
+        self.batch_progress.setPreferredSize(Dimension(300, 18))
         actions.add(self.batch_scan_button)
         actions.add(self.batch_run_button)
         actions.add(self.batch_cancel_button)
