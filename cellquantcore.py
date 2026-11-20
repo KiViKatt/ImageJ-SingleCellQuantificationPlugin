@@ -51,6 +51,7 @@ from java.awt.geom import RoundRectangle2D, Arc2D
 from java.awt.image import BufferedImage
 from ij.process import ImageStatistics, FloatProcessor, ColorProcessor, Blitter
 from java.util import HashMap
+from java.beans import PropertyChangeListener
 from java.awt.dnd import DropTarget, DnDConstants, DropTargetAdapter
 from java.awt.datatransfer import DataFlavor
 from java.io import File
@@ -1818,6 +1819,21 @@ class ResultsAnimation(ActionListener):
         self.canvas.repaint()
 
 
+class JobBarWatcher(PropertyChangeListener):
+    """Shows the progress bar and the Cancel button while a job can be
+    cancelled, and hides them when it has ended."""
+
+    def __init__(self, window):
+        self.window = window
+
+    def propertyChange(self, event):
+        running = bool(self.window.job_cancel_button.isEnabled())
+        self.window.job_progress.setVisible(running)
+        self.window.job_cancel_button.setVisible(running)
+        self.window.job_side.revalidate()
+        self.window.job_side.repaint()
+
+
 class LookWindowListener(WindowAdapter):
     """Puts Fiji's own look back when the window has closed."""
 
@@ -2189,19 +2205,29 @@ class CellQuantStudioUniversal(JFrame):
         """The strip under the tabs that shows a background job (an analysis,
         a validation, a sensitivity, tuning, tissue, count correction or
         robustness run) and lets the user cancel it."""
-        bar = JPanel(FlowLayout(FlowLayout.LEFT))
-        self.job_label = JLabel("No background job is running.")
+        # While nothing runs, the strip is one quiet line of text. The
+        # progress bar and the Cancel button appear only while a job runs
+        # (JobBarWatcher follows the button, which every job enables).
+        bar = JPanel(BorderLayout(12, 0))
+        bar.setBorder(BorderFactory.createEmptyBorder(2, 8, 0, 4))
+        bar.setPreferredSize(Dimension(200, 38))
+        self.job_label = JLabel("Ready.")
+        self.job_label.putClientProperty("FlatLaf.style", "foreground: $Label.disabledForeground")
         self.job_progress = JProgressBar(0, 100)
-        # A thin bar; what it stands for is written beside it (job_label).
         # The string is still set, for scripts and tests that read the state.
         self.job_progress.setStringPainted(False)
         self.job_progress.setString("Idle")
-        self.job_progress.setPreferredSize(Dimension(220, 6))
+        self.job_progress.setPreferredSize(Dimension(260, 8))
         self.job_cancel_button = JButton("Cancel", actionPerformed=self.cancel_background_action)
         self.job_cancel_button.setEnabled(False)
-        bar.add(self.job_progress)
-        bar.add(self.job_cancel_button)
-        bar.add(self.job_label)
+        self.job_side = JPanel(FlowLayout(FlowLayout.RIGHT, 10, 4))
+        self.job_side.add(self.job_progress)
+        self.job_side.add(self.job_cancel_button)
+        self.job_progress.setVisible(False)
+        self.job_cancel_button.setVisible(False)
+        self.job_cancel_button.addPropertyChangeListener("enabled", JobBarWatcher(self))
+        bar.add(self.job_label, BorderLayout.CENTER)
+        bar.add(self.job_side, BorderLayout.EAST)
         return bar
 
     def add_grid_row(self, panel, row, label_text, component, button=None):
