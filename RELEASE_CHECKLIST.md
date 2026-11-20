@@ -34,7 +34,7 @@ Not tested yet:
 
 ## 2. Publishing
 
-1. **Choose a licence.** MIT or BSD-3-Clause are usual for Fiji scripts. Add a `LICENSE` file and a `license:` line in `CITATION.cff`, and replace the licence sentence at the end of `README.md`.
+1. ~~Choose a licence.~~ Done: GPL-3.0-or-later (`LICENSE`, `CITATION.cff`, source headers). Before selling any commercial licence, check your institution's IP policy.
 2. **Tag a release** on GitHub (for example `v2.3.0`) and connect the repository to Zenodo to get a DOI. Add the DOI to `CITATION.cff` and the README.
 3. **Optional: a Fiji update site**, so others install with Help > Update.
 

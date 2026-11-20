@@ -101,7 +101,7 @@ Outputs (UTF-8 CSV):
 
 ## Data and software availability
 
-- Software: **[GitHub URL]**, archived release **[Zenodo DOI]**, licence **[MIT or BSD-3-Clause]**.
+- Software: **[GitHub URL]**, archived release **[Zenodo DOI]**, licence GPL-3.0-or-later.
 - Data: test images, annotations, settings profiles and result tables at **[repository and DOI]**.
 
 ## Use of AI tools
