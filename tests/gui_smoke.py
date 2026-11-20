@@ -27,6 +27,7 @@ from java.awt.event import ActionListener
 from java.io import FileOutputStream
 from java.lang import Runnable, Thread as JavaThread, Throwable as JavaThrowable
 from javax.swing import UIManager
+from java.awt.image import BufferedImage
 from javax.swing import SwingUtilities, JOptionPane, JFileChooser, JButton, JFrame, JPanel, JCheckBox, JComboBox, JTextField
 from javax.swing import Timer as SwingTimer
 from javax.swing.border import TitledBorder
@@ -859,6 +860,34 @@ def step_run_analysis(ctx, t):
     t.equal(canvas.hover, 0, "the pointed ring is highlighted")
     on_edt(lambda: canvas.point_at(-1000, -1000), "moving the pointer away")
     t.equal(canvas.hover, None, "and released when the pointer leaves")
+    # What the rings can show, and choosing it.
+    names = [(metric["name"], metric["unit"]) for metric in shown["metrics"]]
+    t.equal(names, [("DAPI objects", "count"), ("DAPI density", "density"), ("DAPI positive area", "percent"),
+                    ("MAP2 positive area", "percent")], "the rings can show counts, densities and positive areas")
+    density = [float(row.get("C1_DAPI_Object_Density_Per_mm2")) for row in window["summary"][1]]
+    t.equal(shown["metrics"][1]["values"], density, "the density of each region is the one in the summary table")
+    t.equal(shown["labels"], [row.get("Parent_ROI_Name") for row in window["summary"][1]], "the regions are named as in the table")
+    t.equal(len(shape["pills"]), 4, "one name per choice above the map")
+    for pill_index in [2, 0]:
+        pill = canvas.geometry()["pills"][pill_index]
+        on_edt(lambda: canvas.click_at(pill[0] + pill[2] / 2.0, pill[1] + pill[3] / 2.0), "choosing what the rings show")
+        t.equal(canvas.metric, pill_index, "a click on a name chooses it")
+        t.equal(canvas.ring_values()[2], shown["metrics"][pill_index]["unit"], "and the rings show it")
+    # All of the picture on a click, and back.
+    on_edt(lambda: canvas.click_at(shape["x"], shape["y"]), "clicking the picture")
+    t.check(canvas.zoom, "a click on the picture shows all of it")
+    on_edt(lambda: canvas.point_at(shape["x"] + radii[0], shape["y"]), "pointing while the picture is large")
+    t.equal(canvas.hover, None, "no ring is highlighted under the large picture")
+    on_edt(lambda: canvas.click_at(5, 5), "clicking again")
+    t.check(not canvas.zoom, "another click goes back to the map")
+    picture = BufferedImage(canvas.getWidth(), canvas.getHeight(), BufferedImage.TYPE_INT_RGB)
+    for state in [False, True]:
+        canvas.zoom = state
+        pen = picture.createGraphics()
+        on_edt(lambda: canvas.paint(pen), "painting the Results tab")
+        pen.dispose()
+    canvas.zoom = False
+    t.check(True, "the map and the large picture both paint without an error")
     t.check(app.source_preview.picture is not None, "the Session tab shows a small picture of the source image")
     t.equal(as_text(tabs.getTitleAt(0)), "Session", "the Session tab is still the first one")
     on_edt(lambda: tabs.setSelectedIndex(0), "back to the Session tab")
@@ -2346,7 +2375,6 @@ def step_look(ctx, t):
     else:
         t.check(UIManager.getLookAndFeel() is before, "without a look of its own nothing about Fiji changes")
     # Text that does not fit is shortened, never drawn past its room.
-    from java.awt.image import BufferedImage
     pen = BufferedImage(10, 10, BufferedImage.TYPE_INT_RGB).createGraphics()
     wide = pen.getFontMetrics().stringWidth("a rather long caption for a small card")
     t.check(0 < ns["paint_fitted"](pen, "a rather long caption for a small card", 0, 9, wide // 2) <= wide // 2,

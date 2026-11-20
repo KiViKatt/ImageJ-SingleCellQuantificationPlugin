@@ -23,7 +23,17 @@ Built-in tools check the results: object counts against manual point marks, mask
 
 ## Look and Results tab
 
-- **Results tab: the organoid map.** After "3. Run analysis" the window shows the run as one picture. In the middle, in a round window, are all channels merged in their own colors with every detected object outlined. Around it is one ring per parent ROI (the first six); the arc of a ring is that region's object count as a share of the largest one (or its positive-area share when no channel counts objects). Pointing at a ring, or at a region in the list on the right, lights it up and outlines that region on the picture. The headline figures are on the left: counts are added up over the parent ROIs; a positive-area share is the positive area of all ROIs divided by their area. Nothing new is measured or written: the numbers come from `roi_summary.csv`, which remains the record.
+- **Results tab: the organoid map.** After "3. Run analysis" the window shows the run as one picture.
+  - **In the middle**, in a round window: all channels merged in their own colors, every detected object outlined. A click on it shows the whole picture, uncropped, with the parent ROIs named; another click goes back.
+  - **Around it**, one ring per parent ROI (the first eight). The arc of a ring is that region's value as a share of the largest one. The names above the map choose the value: object count, object density per mm², or positive-area share, for every channel that has it.
+  - **On the left**, the headline figures: counts added up over the parent ROIs with the overall density, and positive-area shares (positive area of all ROIs divided by their area).
+  - **On the right**, the regions: the chosen value in large figures, the other values and the ROI area under the name.
+  - Pointing at a ring or at a region lights it up and outlines that region on the picture.
+  - Nothing new is measured or written: every number comes from `roi_summary.csv`, which remains the record.
+
+![One ring metric chosen and one region pointed at](docs/images/results_hover.jpg)
+
+![The whole picture after a click](docs/images/results_picture.jpg)
 - **Appearance.** The window has its own look: deep-water blues with one glowing accent, Manrope for the interface and Instrument Serif italic for the figures. Both fonts are in the `fonts` folder under the SIL Open Font License; without them the window uses the system fonts. The look is built on FlatLaf's dark theme, which ships with Fiji. A Swing theme applies to every Fiji window, so Fiji changes with it while Cell Quant Studio is open and gets its previous look back when the window closes. **Appearance > Fiji default** at the top right leaves Fiji as it is; the choice is remembered.
 
 - **Session tab.** A drop zone for the image file with the workflow steps, and a small picture of the source image beside its description.
