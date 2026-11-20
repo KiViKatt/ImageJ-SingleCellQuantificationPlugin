@@ -1173,3 +1173,51 @@ TESTS.append(("tuning: size shortcut with holes and zero objects (known counts)"
 TESTS.append(("tuning: selection, ties and cross-validation on hand-computed counts", test_tune_selection_arithmetic))
 TESTS.append(("tuning: old profiles, round trip, and module-off runs byte-identical", test_tune_profile_compatibility))
 TESTS.append(("tuning: fields of one organoid are held out together (subfolders)", test_tune_hold_out_by_subfolder))
+
+
+def test_tune_java_error_is_reported(E, t, tmp):
+    """An error raised inside ImageJ or a plugin (a Java error) for one
+    combination is reported for that combination and the others are still
+    scored. Before the fix only Python errors were caught, so the whole
+    tuning run stopped. A cancel still stops it."""
+    from java.lang import IllegalStateException
+
+    class FailingEngine(E.AnalysisEngine):
+        failure = None
+
+        def build_masks(self, prepared_imp, config, title_prefix):
+            if config["manual_low"] > 1200:
+                raise self.failure
+            return E.AnalysisEngine.build_masks(self, prepared_imp, config, title_prefix)
+
+    engine = FailingEngine()
+    engine.failure = IllegalStateException("plugin failure")
+    config = tune_config(E, {"manual_low": 1000})
+    space = E.normalize_tune_search_space(config, {"manual_low": [1000, 1500], "min_size": [20]})
+    combos = E.tune_build_combinations(config, space)
+    source = tune_image("J.tif", tune_plane(TUNE_FIELD_A))
+    field = {"name": "J", "source": source, "points": list(TUNE_FIELD_A["nuclei"]), "rois": None}
+    work = E.tune_open_field(engine, field, config, False, None, False, None)
+    try:
+        scores = E.tune_score_field(engine, work, combos, True)
+        by_threshold = {}
+        for index in range(len(combos)):
+            if combos[index]["status"] == "":
+                by_threshold[combos[index]["config"]["manual_low"]] = scores[index]
+        t.check("plugin failure" in by_threshold[1500.0].get("error", ""), "the failing combination carries the error text")
+        t.check("error" not in by_threshold[1000.0] and by_threshold[1000.0]["detected"] > 0,
+                "the working combination is still scored")
+
+        engine.failure = E.AnalysisCancelled("Cancelled by user.")
+        cancelled = False
+        try:
+            E.tune_score_field(engine, work, combos, True)
+        except E.AnalysisCancelled:
+            cancelled = True
+        t.check(cancelled, "a cancel still ends the scoring")
+    finally:
+        E.tune_close_field(work)
+        source.close()
+
+
+TESTS.append(("tuning: a Java error in one combination is reported, not fatal", test_tune_java_error_is_reported))
