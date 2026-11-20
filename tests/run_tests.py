@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Ivan Khimach
+
 # Cell Quant Studio Universal - automated tests for the analysis engine
 #
 # What this checks: the measurement code in cellquantengine.py, on small

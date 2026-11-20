@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Ivan Khimach
+
 # Cell Quant Studio Universal - regression tests for engine fixes of 2.3.0
 #
 # Loaded by tests/run_tests.py, which executes this file in its own

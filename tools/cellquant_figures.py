@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Ivan Khimach
+
 """Cell Quant Studio Universal - figures from result tables.
 
 Turns the CSV tables written by Cell Quant Studio into SVG figures for a
