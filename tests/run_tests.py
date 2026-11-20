@@ -645,6 +645,55 @@ def test_clahe_without_image_window(E, t, tmp):
     E.safe_close_image(data["final"])
 
 
+def test_clahe_strips_identical(E, t, tmp):
+    """CLAHE on several cores, strip by strip, gives the pixels of CLAHE in one piece."""
+    if not clahe_available():
+        raise SkipTest("CLAHE plugin is not installed")
+    wide = 310
+    high = 1100
+    plane = ShortProcessor(wide, high)
+    for y in range(high):
+        for x in range(0, wide, 5):
+            plane.setValue(float(200 + ((x * 7 + y * 13) % 900) + (x * y) % 37))
+            plane.fill(Roi(x, y, 5, 1))
+    for index in range(40):
+        plane.setValue(float(1500 + 40 * index))
+        plane.fill(OvalRoi((index * 53) % (wide - 30), (index * 97) % (high - 30), 12 + index % 9, 12 + index % 7))
+    plane.resetRoi()
+    plane.resetMinAndMax()
+    eight = plane.duplicate()
+    eight.setMinAndMax(0, 3200)
+    eight = eight.convertToByte(True)
+    for name, source in [("16-bit", plane), ("8-bit", eight)]:
+        for block in [31, 127]:
+            single = ImagePlus("single", source.duplicate())
+            E.apply_clahe(single, block, 256, 3.0, strips=1)
+            reference = list(single.getProcessor().getPixels())
+            t.check(reference != list(source.getPixels()), name + ", block " + str(block) + ": CLAHE changes the image")
+            for strips in [2, 4, None]:
+                several = ImagePlus("several", source.duplicate())
+                E.apply_clahe(several, block, 256, 3.0, strips=strips)
+                t.check(list(several.getProcessor().getPixels()) == reference,
+                        name + ", block " + str(block) + ", strips " + str(strips) + ": identical pixels")
+                t.equal((several.getProcessor().getMin(), several.getProcessor().getMax()),
+                        (single.getProcessor().getMin(), single.getProcessor().getMax()),
+                        name + ", block " + str(block) + ", strips " + str(strips) + ": same display range")
+    t.equal(E.clahe_strip_count(100), 1, "a small image is processed in one piece")
+    t.check(1 <= E.clahe_strip_count(8000) <= E.CLAHE_STRIP_LIMIT, "the number of strips is limited")
+    # A 16-bit plane whose display range was never set: both ways must
+    # still agree (the strips leave it to the one-piece path).
+    unset = ShortProcessor(wide, high)
+    unset.insert(plane, 0, 0)
+    pair = []
+    for strips in [1, 4]:
+        odd = ImagePlus("unset", unset.duplicate())
+        E.apply_clahe(odd, 31, 256, 3.0, strips=strips)
+        pair.append(list(odd.getProcessor().getPixels()))
+    t.check(pair[0] == pair[1], "a plane without a display range gives the same pixels both ways")
+    float_imp = ImagePlus("float", plane.convertToFloat())
+    t.check(not E.clahe_in_strips(None, float_imp, 15, 255, 3.0, 4), "other pixel types are left to the one-piece path")
+
+
 def test_all_frames(E, t, tmp):
     imp = make_image("frames.tif", slices=1, frames=2, disks_per_frame=[DISKS, DISKS[:7]])
     result = run_image(E, imp, [nuclei_config(E), marker_config(E)], [E.whole_image_roi(imp)], tmp, frames=[1, 2])
@@ -875,6 +924,7 @@ TESTS = [
     ("automatic threshold ignores the display range", test_auto_threshold_ignores_display_range),
     ("local threshold ignores the conversion option", test_local_threshold_ignores_conversion_option),
     ("CLAHE works without an image window", test_clahe_without_image_window),
+    ("CLAHE in strips on several cores is pixel-identical", test_clahe_strips_identical),
     ("all frames", test_all_frames),
     ("folder batch", test_batch),
     ("validation against point marks", test_point_validation),

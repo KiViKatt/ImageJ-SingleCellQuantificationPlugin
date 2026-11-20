@@ -2179,12 +2179,16 @@ class CellQuantStudioUniversal(JFrame):
         panel.add(self.results_canvas, BorderLayout.CENTER)
         return panel
 
-    def show_results(self, result, configs, run_dir, source_title=""):
+    def show_results(self, result, configs, run_dir, source_title="", pictures=None):
         """Event thread: fill the Results tab from a finished analysis and
-        bring it to the front. A failure here never fails the analysis."""
+        bring it to the front. A failure here never fails the analysis.
+
+        pictures: what results_pictures() returned for this run, built
+        beforehand on the worker thread (it takes seconds for a large image
+        and must not freeze the window); None builds it here."""
         try:
             self.results_canvas.data = results_from_summary(result["summary_headers"], result["summary_rows"], configs)
-            self.results_canvas.pictures = results_pictures(run_dir, configs)
+            self.results_canvas.pictures = results_pictures(run_dir, configs) if pictures is None else pictures
             self.results_canvas.metric = 0
             self.results_canvas.zoom = False
             regions = self.results_canvas.data["regions"]
@@ -4214,6 +4218,9 @@ class CellQuantStudioUniversal(JFrame):
             self.save_run_log(os.path.join(run_dir, "run_log.txt"))
             raise
         self.save_run_log(os.path.join(run_dir, "run_log.txt"))
+        # The picture of the Results tab, made here so that the window does
+        # not freeze while it is drawn. It only reads files of the run.
+        values["result_pictures"] = results_pictures(run_dir, values["configs"])
         return result
 
     def analysis_finished(self, job):
@@ -4254,7 +4261,10 @@ class CellQuantStudioUniversal(JFrame):
             self.source_path = ""
             self.update_source_info()
 
-        self.show_results(result, values["configs"], values["run_dir"], values["source"].getTitle())
+        self.show_results(
+            result, values["configs"], values["run_dir"], values["source"].getTitle(),
+            pictures=values.get("result_pictures")
+        )
         self.show_job_result("Analysis complete.", values["run_dir"], warning)
 
     def show_job_result(self, headline, run_dir, warning=""):
