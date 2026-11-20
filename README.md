@@ -34,7 +34,7 @@ Built-in tools check the results: object counts against manual point marks, mask
 ![One ring metric chosen and one region pointed at](docs/images/results_hover.jpg)
 
 ![The whole picture after a click](docs/images/results_picture.jpg)
-- **Appearance.** The window has its own look: deep-water blues with one glowing accent, Manrope for the interface and Instrument Serif italic for the figures. Both fonts are in the `fonts` folder under the SIL Open Font License; without them the window uses the system fonts. The look is built on FlatLaf's dark theme, which ships with Fiji. A Swing theme applies to every Fiji window, so Fiji changes with it while Cell Quant Studio is open and gets its previous look back when the window closes. **Appearance > Fiji default** at the top right leaves Fiji as it is; the choice is remembered.
+- **Appearance.** The window has its own look: deep-water blues with one glowing accent, IBM Plex Sans for the interface and Chakra Petch, an angular technical face, for the title and the figures. Both fonts are in the `fonts` folder under the SIL Open Font License; without them the window uses the system fonts. The look is built on FlatLaf's dark theme, which ships with Fiji. A Swing theme applies to every Fiji window, so Fiji changes with it while Cell Quant Studio is open and gets its previous look back when the window closes. **Appearance > Fiji default** at the top right leaves Fiji as it is; the choice is remembered.
 
 - **Session tab.** A drop zone for the image file with the workflow steps, and a small picture of the source image beside its description.
 
@@ -94,7 +94,7 @@ An object is a segmented image component; its biological identity must be establ
 | `cellquantrobust.py` | Optional: group-level robustness across a grid of settings. |
 | `cellquant_batch_headless.py` | Folder batch from a saved profile, without the window. |
 | `tests/` | Automated tests: `run_tests.py` (engine and modules, loads every `test_*.py`), `gui_smoke.py` (the window), `run_tests.sh` and `cli_runner.py` (run them from a terminal). |
-| `fonts/` | Manrope and Instrument Serif with their licence texts (SIL Open Font License 1.1). Optional: copy the folder beside the application files to get the window's own look. |
+| `fonts/` | IBM Plex Sans and Chakra Petch with their licence texts (SIL Open Font License 1.1). Optional: copy the folder beside the application files to get the window's own look. |
 | `tools/` | `cellquant_figures.py`: SVG figures from result tables, with its own tests. |
 | `examples/` | An example four-channel settings profile. |
 | `docs/VALIDATION.md` | How to validate a profile with the built-in tools. |

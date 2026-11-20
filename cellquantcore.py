@@ -523,8 +523,9 @@ class ChannelSettingsPanel(JPanel):
 # -----------------------------------------------------------------------------
 #
 # The look is the window's own: deep-water blues with one glowing accent,
-# Manrope for the interface and Instrument Serif italic for the figures
-# (both under the SIL Open Font License, in the fonts folder). It is built
+# IBM Plex Sans for the interface and Chakra Petch, an angular technical
+# face, for the title and the figures (both under the SIL Open Font
+# License, in the fonts folder). It is built
 # on FlatLaf's dark theme, which ships with Fiji. A Swing look applies to
 # every window of Fiji, so it is switched on when the window opens and the
 # previous look is put back when the window closes. "Fiji default" (top
@@ -537,9 +538,10 @@ LOOK_PREF_KEY = "cellquant.look"
 LOOK_STATE = {"active": False, "name": None, "previous": None, "extras": None}
 LOOK_FONTS = {"loaded": False}
 LOOK_FONT_FILES = [
-    ("ui", "Manrope-Regular.ttf"), ("ui_semibold", "Manrope-SemiBold.ttf"), ("ui_bold", "Manrope-Bold.ttf"),
-    ("figure", "InstrumentSerif-Italic.ttf"), ("figure_upright", "InstrumentSerif-Regular.ttf")
+    ("ui", "IBMPlexSans-Regular.ttf"), ("ui_semibold", "IBMPlexSans-Medium.ttf"), ("ui_bold", "IBMPlexSans-SemiBold.ttf"),
+    ("figure", "ChakraPetch-SemiBold.ttf"), ("figure_light", "ChakraPetch-Medium.ttf"), ("title", "ChakraPetch-Bold.ttf")
 ]
+LOOK_UI_FAMILY = "IBM Plex Sans"
 # The palette.
 LOOK_DEEP = Color(6, 18, 31)
 LOOK_PANEL = Color(11, 34, 51)
@@ -592,6 +594,8 @@ RING_COLORS = [
     Color(255, 214, 110), Color(120, 180, 255), Color(232, 140, 255)
 ]
 RING_LIMIT = 8
+PILLS_LABEL = "RINGS SHOW"
+PICTURE_BADGE = "Click to enlarge"
 RESULTS_TAB_TITLE = "Results"
 RESULTS_PICTURE_SIZE = 900
 CARD_ARC = 16.0
@@ -634,17 +638,17 @@ def look_fonts_load():
 
 
 def look_font(kind, size):
-    """A font of the look: "ui", "ui_semibold", "ui_bold", "figure" (the
-    serif italic of the large numbers) or "figure_upright". Without the
-    bundled font, the nearest system font."""
+    """A font of the look: "ui", "ui_semibold", "ui_bold" for the interface;
+    "figure", "figure_light" and "title" for the large numbers and the
+    name of the application. Without the bundled font, the system font."""
     look_fonts_load()
     font = LOOK_FONTS.get(kind)
     if font is not None:
         return font.deriveFont(float(size))
-    if kind == "figure":
-        return Font("Serif", Font.ITALIC, int(size))
-    if kind == "figure_upright":
-        return Font("Serif", Font.PLAIN, int(size))
+    if kind in ("figure", "title"):
+        return Font("SansSerif", Font.BOLD, int(size))
+    if kind == "figure_light":
+        return Font("SansSerif", Font.PLAIN, int(size))
     base = UIManager.getFont("Label.font")
     if base is None:
         base = Font("SansSerif", Font.PLAIN, 13)
@@ -666,7 +670,7 @@ def look_install(name=LOOK_DARK):
         for pair in LOOK_EXTRAS:
             extras.put(pair[0], pair[1])
         if "ui" in LOOK_FONTS:
-            extras.put("defaultFont", "13 Manrope")
+            extras.put("defaultFont", "13 " + LOOK_UI_FAMILY)
         FlatLaf.setGlobalExtraDefaults(extras)
         FlatDarkLaf.setup()
         FlatLaf.updateUI()
@@ -1229,6 +1233,9 @@ class ResultsCanvas(JPanel):
         self.hover = None
         self.metric = 0
         self.zoom = False
+        # What the pointer is over, for the highlight that says "this can be
+        # clicked": None, ("picture",) or ("pill", index).
+        self.over = None
         self.setOpaque(True)
         watcher = RingWatcher(self)
         self.addMouseMotionListener(watcher)
@@ -1274,14 +1281,19 @@ class ResultsCanvas(JPanel):
         if len(found) > 1:
             measure = self.getFontMetrics(look_font("ui_semibold", 12))
             widths = [measure.stringWidth(metric["name"]) + 26 for metric in found]
-            total = sum(widths) + 6 * (len(widths) - 1)
+            lead = measure.stringWidth(PILLS_LABEL) + 14
+            total = lead + sum(widths) + 6 * (len(widths) - 1)
+            if total > map_right - map_left - 20:
+                # No room for the label: the choices alone.
+                lead = 0
+                total = sum(widths) + 6 * (len(widths) - 1)
             if total <= map_right - map_left - 20:
-                start = (map_left + map_right) / 2.0 - total / 2.0
+                start = (map_left + map_right) / 2.0 - total / 2.0 + lead
                 for index in range(len(widths)):
                     pills.append((start, 14.0, float(widths[index]), 28.0))
                     start += widths[index] + 6
                 pill_space = 46
-        hint_space = 26
+        hint_space = 8
         center_x = (map_left + map_right) / 2.0
         center_y = pill_space + (height - pill_space - hint_space) / 2.0
         outer = max(40.0, min(map_right - map_left, height - pill_space - hint_space) / 2.0 - 22.0)
@@ -1337,13 +1349,21 @@ class ResultsCanvas(JPanel):
 
     def point_at(self, x, y):
         found = None if self.zoom else self.ring_at(x, y)
-        clickable = self.zoom or self.pill_at(x, y) is not None or self.on_picture(x, y)
+        over = None
+        if not self.zoom:
+            pill = self.pill_at(x, y)
+            if pill is not None:
+                over = ("pill", pill)
+            elif self.on_picture(x, y):
+                over = ("picture",)
+        clickable = self.zoom or over is not None
         try:
             self.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR if clickable else Cursor.DEFAULT_CURSOR))
         except ANY_ERROR:
             pass
-        if found != self.hover:
+        if found != self.hover or over != self.over:
             self.hover = found
+            self.over = over
             self.repaint()
 
     def click_at(self, x, y):
@@ -1390,18 +1410,11 @@ class ResultsCanvas(JPanel):
         self.paint_pills(graphics, shape, back, text, faint, line)
         if shape["show_right"]:
             self.paint_regions(graphics, shape, text, faint, line)
-        if len(self.pictures) > 0 and not self.zoom:
-            graphics.setFont(look_font("ui", 12))
-            graphics.setColor(faint)
-            hint = "Click the picture to see all of it."
-            room = shape["map_right"] - shape["map_left"] - 20
-            shown_width = min(graphics.getFontMetrics().stringWidth(hint), room)
-            paint_fitted(graphics, hint, shape["x"] - shown_width / 2.0, height - 10, room)
         if self.zoom:
             self.paint_zoom(graphics, width, height, text, faint)
 
     def paint_empty(self, graphics, width, height, text, faint):
-        graphics.setFont(look_font("figure", 34))
+        graphics.setFont(look_font("figure", 30))
         graphics.setColor(text)
         headline = "No results yet"
         graphics.drawString(headline, (width - graphics.getFontMetrics().stringWidth(headline)) // 2, height // 2 - 6)
@@ -1431,7 +1444,7 @@ class ResultsCanvas(JPanel):
             unit = "percent" if tile["kind"] == "percent" else "count"
             figure = format_metric(shown, unit)
             final = format_metric(tile["value"], unit)
-            size = 54
+            size = 50
             graphics.setFont(look_font("figure", size))
             while size > 24 and graphics.getFontMetrics().stringWidth(final) > room:
                 size -= 4
@@ -1449,18 +1462,31 @@ class ResultsCanvas(JPanel):
         found = self.metrics()
         graphics.setFont(look_font("ui_semibold", 12))
         metrics = graphics.getFontMetrics()
+        if len(shape["pills"]) > 0:
+            first = shape["pills"][0]
+            lead = metrics.stringWidth(PILLS_LABEL) + 14
+            if first[0] - lead >= shape["map_left"]:
+                graphics.setFont(look_font("ui_semibold", 11))
+                graphics.setColor(faint)
+                graphics.drawString(PILLS_LABEL, int(first[0] - lead), int(first[1] + 18))
+                graphics.setFont(look_font("ui_semibold", 12))
         for index in range(len(shape["pills"])):
             left, top, wide, high = shape["pills"][index]
             outline = RoundRectangle2D.Float(left, top, wide, high, high, high)
+            pointed = self.over == ("pill", index)
             if index == self.metric:
                 graphics.setColor(LOOK_ACCENT)
                 graphics.fill(outline)
                 graphics.setColor(LOOK_DEEP)
             else:
-                graphics.setStroke(BasicStroke(1.0))
-                graphics.setColor(line)
+                # A choice that can be clicked: outlined; brighter under the pointer.
+                if pointed:
+                    graphics.setColor(Color(LOOK_ACCENT.getRed(), LOOK_ACCENT.getGreen(), LOOK_ACCENT.getBlue(), 40))
+                    graphics.fill(outline)
+                graphics.setStroke(BasicStroke(1.5 if pointed else 1.0))
+                graphics.setColor(LOOK_ACCENT if pointed else look_mix(line, text, 0.25))
                 graphics.draw(outline)
-                graphics.setColor(faint)
+                graphics.setColor(text if pointed else look_mix(faint, text, 0.4))
             name = found[index]["name"]
             graphics.drawString(name, int(left + (wide - metrics.stringWidth(name)) / 2.0), int(top + 19))
 
@@ -1552,9 +1578,38 @@ class ResultsCanvas(JPanel):
         graphics.drawImage(image, int(left), int(top), int(image.getWidth() * scale), int(image.getHeight() * scale), None)
         self.paint_outlines(graphics, parents, left, top, scale, False)
         graphics.setClip(old_clip)
-        graphics.setStroke(BasicStroke(2.0))
-        graphics.setColor(line)
+        pointed = self.over == ("picture",)
+        graphics.setStroke(BasicStroke(3.0 if pointed else 2.0))
+        graphics.setColor(LOOK_ACCENT if pointed else line)
         graphics.draw(window)
+        # A badge on the picture says that it can be clicked.
+        graphics.setFont(look_font("ui_semibold", 12))
+        measure = graphics.getFontMetrics()
+        badge_wide = measure.stringWidth(PICTURE_BADGE) + 44
+        if badge_wide < 2 * radius - 30:
+            badge_left = center_x - badge_wide / 2.0
+            badge_top = center_y + radius - 46
+            badge = RoundRectangle2D.Float(badge_left, badge_top, badge_wide, 28.0, 28.0, 28.0)
+            if pointed:
+                graphics.setColor(LOOK_ACCENT)
+                graphics.fill(badge)
+                ink = LOOK_DEEP
+            else:
+                graphics.setColor(Color(LOOK_DEEP.getRed(), LOOK_DEEP.getGreen(), LOOK_DEEP.getBlue(), 225))
+                graphics.fill(badge)
+                graphics.setStroke(BasicStroke(1.0))
+                graphics.setColor(LOOK_ACCENT)
+                graphics.draw(badge)
+                ink = LOOK_ACCENT
+            graphics.setColor(ink)
+            # Two arrows pointing apart: "make this larger".
+            graphics.setStroke(BasicStroke(1.6, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND))
+            icon_x = int(badge_left + 14)
+            icon_y = int(badge_top + 9)
+            graphics.drawLine(icon_x, icon_y + 10, icon_x + 10, icon_y)
+            graphics.drawPolyline([icon_x + 5, icon_x + 10, icon_x + 10], [icon_y, icon_y, icon_y + 5], 3)
+            graphics.drawPolyline([icon_x, icon_x, icon_x + 5], [icon_y + 5, icon_y + 10, icon_y + 10], 3)
+            graphics.drawString(PICTURE_BADGE, int(badge_left + 32), int(badge_top + 19))
 
     def paint_zoom(self, graphics, width, height, text, faint):
         """All of the picture, uncropped, over the map; a click closes it."""
@@ -1579,9 +1634,18 @@ class ResultsCanvas(JPanel):
         graphics.setClip(old_clip)
         graphics.setFont(look_font("ui", 12))
         graphics.setColor(faint)
-        caption = to_text(picture[0]) + ".  Click anywhere to go back to the map."
+        caption = to_text(picture[0])
         shown = min(graphics.getFontMetrics().stringWidth(caption), width - 40)
         paint_fitted(graphics, caption, (width - shown) // 2, height - 20, width - 40)
+        # The way back, as a button in the corner (a click anywhere works).
+        graphics.setFont(look_font("ui_semibold", 12))
+        words = "Back to the map"
+        back_wide = graphics.getFontMetrics().stringWidth(words) + 30
+        back = RoundRectangle2D.Float(width - back_wide - 18.0, 16.0, float(back_wide), 28.0, 28.0, 28.0)
+        graphics.setColor(LOOK_ACCENT)
+        graphics.fill(back)
+        graphics.setColor(LOOK_DEEP)
+        graphics.drawString(words, int(width - back_wide - 18 + 15), 35)
 
     def paint_regions(self, graphics, shape, text, faint, line):
         """Right: the regions, one row per ring. The large figure is what
@@ -1609,7 +1673,7 @@ class ResultsCanvas(JPanel):
             graphics.drawLine(int(row_left + 8), int(row_top + row_high), int(row_left + row_wide - 8), int(row_top + row_high))
             number = values[index]
             figure = format_metric(None if number is None else number * self.progress, unit)
-            size = 26
+            size = 24
             graphics.setFont(look_font("figure", size))
             while size > 16 and graphics.getFontMetrics().stringWidth(format_metric(number, unit)) > row_wide * 0.5:
                 size -= 2
@@ -1650,7 +1714,7 @@ class ResultsCanvas(JPanel):
             graphics.setFont(look_font("ui", 12))
             graphics.setColor(faint)
             more = len(self.data.get("labels", [])) - len(rows)
-            note = "Point at a ring to see its region." if more <= 0 else str(more) + " more regions are in the tables."
+            note = "Point at a ring or a row to light up its region." if more <= 0 else str(more) + " more regions are in the tables."
             paint_fitted(graphics, note, left + 8, note_top, wide - 8)
 
 
@@ -1966,7 +2030,7 @@ class CellQuantStudioUniversal(JFrame):
         if base is None:
             base = Font("SansSerif", Font.PLAIN, 13)
         title = JLabel(APP_NAME)
-        title.setFont(look_font("ui_bold", 24))
+        title.setFont(look_font("title", 26))
         subtitle = JLabel(
             "Count cells and measure markers in fluorescence microscopy images, the same way every time.  Version " + APP_VERSION
         )
