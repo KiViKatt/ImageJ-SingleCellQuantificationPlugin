@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Ivan Khimach
+
 # Cell Quant Studio Universal - automatic tissue outline (optional module)
 #
 # Finds the outline of the tissue (for example an organoid section) in an

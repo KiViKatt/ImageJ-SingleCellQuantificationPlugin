@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Ivan Khimach
+
 # Cell Quant Studio Universal - tests of opening files through Bio-Formats
 #
 # Loaded by run_tests.py, which provides the helpers used here. Both tests
