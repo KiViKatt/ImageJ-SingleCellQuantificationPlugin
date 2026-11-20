@@ -842,9 +842,23 @@ def step_run_analysis(ctx, t):
         t.close(marker_tiles[0]["value"], positive / measured * 100.0, "the marker tile is positive area over measured area")
     t.equal(shown["bars"]["labels"], [row.get("Parent_ROI_Name") for row in window["summary"][1]], "one group of bars per parent ROI")
     captions = [as_text(picture[0]) for picture in app.results_canvas.pictures]
-    t.equal(len(captions), 2, "the merged picture and the object overlay of the run are shown")
-    t.check(len(captions) == 2 and captions[0].startswith("All channels") and (str(counted) + " detected objects") in captions[0],
+    t.equal(len(captions), 1, "the merged picture of the run is shown")
+    t.check(len(captions) == 1 and captions[0].startswith("All channels") and (str(counted) + " detected objects") in captions[0],
             "the merged picture outlines every counted object")
+    canvas = app.results_canvas
+    t.equal(len(canvas.pictures[0][2]), 2, "both parent ROIs are kept as outlines for the picture")
+    shape = canvas.geometry()
+    t.equal(len(shape["rings"]), 2, "one ring per parent ROI")
+    for ring_index in range(len(shape["rings"])):
+        radius = shape["rings"][ring_index][0]
+        t.equal(canvas.ring_at(shape["x"] + radius, shape["y"]), ring_index, "pointing at ring " + str(ring_index + 1) + " finds it")
+    t.equal(canvas.ring_at(shape["x"], shape["y"]), None, "the picture in the middle is no ring")
+    radii = [ring[0] for ring in shape["rings"]]
+    t.check(radii == sorted(radii, reverse=True) and shape["picture"] < radii[-1], "rings lie around the picture, without overlap")
+    on_edt(lambda: canvas.point_at(shape["x"] + radii[0], shape["y"]), "pointing at the first ring")
+    t.equal(canvas.hover, 0, "the pointed ring is highlighted")
+    on_edt(lambda: canvas.point_at(-1000, -1000), "moving the pointer away")
+    t.equal(canvas.hover, None, "and released when the pointer leaves")
     t.check(app.source_preview.picture is not None, "the Session tab shows a small picture of the source image")
     t.equal(as_text(tabs.getTitleAt(0)), "Session", "the Session tab is still the first one")
     on_edt(lambda: tabs.setSelectedIndex(0), "back to the Session tab")
@@ -2310,8 +2324,25 @@ def step_look(ctx, t):
     if state["active"]:
         t.check(UIManager.getLookAndFeel() is not before, "the chosen look is on while the window is open")
         t.equal(ns["look_is_dark"](), wanted == ns["LOOK_DARK"], "it is dark exactly when Dark is chosen")
+        for kind in ["ui", "ui_bold", "figure"]:
+            t.check(kind in ns["LOOK_FONTS"], "the bundled font '" + kind + "' is loaded")
+        t.check(ns["look_font"]("figure", 20).getSize() == 20, "look_font gives the asked size")
         t.equal(as_text(window.look_combo.getSelectedItem()), wanted, "the title row shows the look in use")
         t.equal(state["name"], wanted, "the look in use is the remembered choice")
+        # Switching the look while the window is open: Fiji gets its own look
+        # back at once, the tabs are shaped again for the other font, and
+        # the labels keep their texts.
+        some_label = [item for item in find_components(window, Component)
+                      if as_text(type(item).__name__) == "JLabel" and item.getClientProperty("cellquant.text") is not None][0]
+        label_text = as_text(some_label.getClientProperty("cellquant.text"))
+        on_edt(lambda: window.look_combo.setSelectedItem(ns["LOOK_FIJI"]), "choosing Fiji's look")
+        settle(ctx)
+        t.check(not state["active"] and UIManager.getLookAndFeel() is before, "'Fiji default' gives Fiji its look back at once")
+        on_edt(lambda: window.look_combo.setSelectedItem(wanted), "choosing the remembered look again")
+        settle(ctx)
+        t.check(state["active"] and state["name"] == wanted, "and the window's look comes back")
+        t.equal(as_text(some_label.getClientProperty("cellquant.text")), label_text, "labels keep their text through both changes")
+        t.equal(ns["look_preference"](), wanted, "the remembered choice is as it was")
     else:
         t.check(UIManager.getLookAndFeel() is before, "without a look of its own nothing about Fiji changes")
     # Text that does not fit is shortened, never drawn past its room.
