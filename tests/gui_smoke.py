@@ -22,11 +22,11 @@
 # The source is kept plain ASCII with no encoding declaration on purpose.
 
 from ij import IJ, ImagePlus, ImageStack, CompositeImage, WindowManager, Prefs, ImageJ
-from ij.process import ShortProcessor, ImageConverter
+from ij.process import ShortProcessor, ImageConverter, LUT
 from ij.gui import Roi, OvalRoi, PolygonRoi, PointRoi
 from ij.io import FileSaver
 from ij.plugin.frame import RoiManager
-from java.awt import Polygon, Window, Dialog, Component
+from java.awt import Polygon, Window, Dialog, Component, Color
 from java.awt.event import ActionListener
 from java.io import FileOutputStream
 from java.lang import Runnable, Thread as JavaThread, Throwable as JavaThrowable
@@ -34,6 +34,8 @@ from javax.swing import UIManager
 from java.awt.image import BufferedImage
 from javax.swing import SwingUtilities, JOptionPane, JFileChooser, JButton, JFrame, JPanel, JCheckBox, JComboBox, JTextField
 from javax.swing import Timer as SwingTimer
+from javax.swing import JLabel, AbstractButton, CellRendererPane
+from java.awt import Rectangle
 from javax.swing.border import TitledBorder
 
 import os
@@ -699,7 +701,7 @@ def step_status_messages(ctx, t):
     on_edt(lambda: app.report_exception("Event thread check", ValueError("bad " + name)), "error report on the event thread")
     expect_dialogs(ctx, t, [("error", "Event thread check: bad " + name)], "error reported on the event thread")
 
-    click(ctx, "1. Prepare enabled channels")
+    click(ctx, "1 Prepare channels")
     expect_dialogs(ctx, t, [("error", "No source image is selected")], "preparing with no image")
     script_call(ctx, app.run_analysis_action, "run analysis with no image")
     expect_dialogs(ctx, t, [("error", "No source image is selected")], "analysis with no image, from a script thread")
@@ -740,7 +742,7 @@ def step_configure(ctx, t):
             t.equal(configs[index][key], expected[index][key], "C" + str(index + 1) + " widget value '" + key + "'")
 
     set_widgets(app.channel_panels[0], {"manual_low": "abc"})
-    click(ctx, "1. Prepare enabled channels")
+    click(ctx, "1 Prepare channels")
     expect_dialogs(ctx, t, [("error", "must be numeric")], "a non-numeric threshold")
     set_widgets(app.channel_panels[0], {"manual_low": 1000})
 
@@ -758,7 +760,7 @@ def step_configure(ctx, t):
 
 def step_prepare_and_preview(ctx, t):
     app = ctx.app
-    click(ctx, "1. Prepare enabled channels")
+    click(ctx, "1 Prepare channels")
     expect_dialogs(ctx, t, [], "preparing the channels")
     t.equal(sorted(app.prepared_images.keys()), [1, 2, 3], "three prepared images")
     for channel in sorted(app.prepared_images.keys()):
@@ -770,7 +772,7 @@ def step_prepare_and_preview(ctx, t):
     t.equal(app.prepared_images[3].getStatistics().max, 400.0, "the maximum projection of C3 holds the brighter slice")
     ctx.prepared_ids = [app.prepared_images[channel].getID() for channel in [1, 2, 3]]
 
-    click(ctx, "2. Preview all masks")
+    click(ctx, "2 Preview masks")
     expect_dialogs(ctx, t, [], "previewing the masks")
     t.equal(sorted([channel for channel in app.mask_preview_ids if len(app.mask_preview_ids[channel]) > 0]), [1, 2], "masks for the two segmented channels")
     for channel in [1, 2]:
@@ -790,7 +792,7 @@ def step_prepare_and_preview(ctx, t):
 def step_run_analysis(ctx, t):
     app = ctx.app
     E = ctx.E
-    click(ctx, "3. Run analysis")
+    click(ctx, "3 Analyse")
     expect_dialogs(ctx, t, [("info", "Analysis complete.")], "run analysis")
     run_dir = as_text(app.last_run_dir)
     t.check(os.path.isdir(run_dir) and run_dir.startswith(ctx.out_dir), "the run folder is inside the chosen output folder")
@@ -952,11 +954,11 @@ def step_second_image(ctx, t):
 def step_prepared_cache(ctx, t):
     app = ctx.app
     use_as_source(ctx, ctx.imp1)
-    click(ctx, "1. Prepare enabled channels")
+    click(ctx, "1 Prepare channels")
     first = [app.prepared_images[channel].getID() for channel in [1, 2, 3]]
     set_widgets(app.channel_panels[0], {"gaussian_sigma": 1})
     t.check(not app.prepared_cache_valid(app.collect_channel_configs(), 1), "changing a preprocessing setting makes the prepared images stale")
-    click(ctx, "2. Preview all masks")
+    click(ctx, "2 Preview masks")
     second = [app.prepared_images[channel].getID() for channel in [1, 2, 3]]
     t.check(first[0] != second[0], "stale prepared images are rebuilt before a mask preview")
     t.equal([image_id for image_id in first if WindowManager.getImage(image_id) is not None], [], "the stale prepared images are closed")
@@ -964,18 +966,18 @@ def step_prepared_cache(ctx, t):
 
     set_widgets(app.channel_panels[2], {"projection": "Current Z"})
     on_edt(lambda: ctx.imp1.setPosition(1, 1, 1), "moving to Z1")
-    click(ctx, "1. Prepare enabled channels")
+    click(ctx, "1 Prepare channels")
     t.equal(app.prepared_images[3].getStatistics().max, 300.0, "'Current Z' prepares the displayed slice")
     on_edt(lambda: ctx.imp1.setPosition(1, 2, 1), "moving to Z2")
     t.check(not app.prepared_cache_valid(app.collect_channel_configs(), 1), "moving the Z slider makes a 'Current Z' prepared image stale")
-    click(ctx, "3. Run analysis")
+    click(ctx, "3 Analyse")
     expect_dialogs(ctx, t, [("info", "Analysis complete.")], "analysis after moving the Z slider")
     summary = read_csv(os.path.join(as_text(app.last_run_dir), "roi_summary.csv"))
     t.close(row_named(summary[1], "rect").get("C3_Channel_3_Mean"), 400.0, "the analysis measures the slice now displayed, not a stale prepared image")
     set_widgets(app.channel_panels[2], {"projection": "Max Z"})
     on_edt(lambda: ctx.imp1.setPosition(1, 1, 1), "moving back to Z1")
 
-    click(ctx, "1. Prepare enabled channels")
+    click(ctx, "1 Prepare channels")
     prepared = app.prepared_images[2]
     click(ctx, "Use active image", current_image=prepared)
     records = expect_dialogs(ctx, t, [("warning", "was made by this application")], "choosing a prepared image as the source")
@@ -989,11 +991,11 @@ def step_display_minimum(ctx, t):
     set_widgets(app.channel_panels[1], {"threshold_mode": "Display minimum"})
     click(ctx, "Quick run")
     expect_dialogs(ctx, t, [("error", "Quick run cannot")], "quick run with a display-minimum threshold")
-    click(ctx, "1. Prepare enabled channels")
+    click(ctx, "1 Prepare channels")
     prepared = app.prepared_images[2]
     on_edt(lambda: prepared.setDisplayRange(1200, 3000), "setting the display range")
     click(ctx, "Preview mask", container=app.channel_panels[1])
-    click(ctx, "3. Run analysis")
+    click(ctx, "3 Analyse")
     expect_dialogs(ctx, t, [("info", "Analysis complete.")], "analysis with a display-minimum threshold")
     run_dir = as_text(app.last_run_dir)
     thresholds = read_csv(os.path.join(run_dir, "thresholds.csv"))
@@ -1007,7 +1009,7 @@ def step_display_minimum(ctx, t):
             "only the brighter inner rectangle is above the display minimum")
 
     set_widgets(app.channel_panels[0], {"gaussian_sigma": 1})
-    click(ctx, "3. Run analysis")
+    click(ctx, "3 Analyse")
     expect_dialogs(ctx, t, [("error", "Display-minimum thresholding requires the current prepared images")],
                    "display minimum with stale prepared images")
     # Validation, sensitivity and the capture button must not rebuild the
@@ -1026,7 +1028,7 @@ def step_display_minimum(ctx, t):
             "a refused capture leaves the threshold mode alone")
     set_widgets(app.channel_panels[0], {"gaussian_sigma": 0})
 
-    click(ctx, "1. Prepare enabled channels")
+    click(ctx, "1 Prepare channels")
     prepared = app.prepared_images[2]
     on_edt(lambda: prepared.setDisplayRange(850, 3000), "setting the display range")
     click(ctx, "Brightness / Contrast", container=app.channel_panels[1])
@@ -1073,15 +1075,15 @@ def step_edited_source(ctx, t):
     t.check(ctx.imp4.changes, "editing a plane marks the source as changed")
     before = as_text(app.last_run_dir)
     ctx.watcher.answer_next("no")
-    click(ctx, "3. Run analysis")
+    click(ctx, "3 Analyse")
     expect_dialogs(ctx, t, [("warning", "has been changed since it was opened")], "analysis of an edited source, declined")
     t.equal(as_text(app.last_run_dir), before, "declining writes no run folder")
     t.check("Analysis cancelled: the source image has unsaved changes." in as_text(app.status_area.getText()), "declining is logged")
 
-    click(ctx, "1. Prepare enabled channels")
+    click(ctx, "1 Prepare channels")
     expect_dialogs(ctx, t, [("warning", "Backspace or Delete key")], "preparing an edited source, accepted")
     t.equal(sorted(app.prepared_images.keys()), [1, 2, 3], "after accepting, the channels are prepared")
-    click(ctx, "3. Run analysis")
+    click(ctx, "3 Analyse")
     expect_dialogs(ctx, t, [("info", "Analysis complete.")], "the question is asked once per source image")
     run_dir = as_text(app.last_run_dir)
     summary = read_csv(os.path.join(run_dir, "roi_summary.csv"))
@@ -1098,17 +1100,17 @@ def step_edited_source(ctx, t):
     on_edt(lambda: IJ.run(prepared, "Add...", "value=1000"), "editing a prepared image by hand")
     t.check(prepared.changes, "editing marks the prepared image as changed")
     t.check(not app.prepared_cache_valid(configs, 1), "a prepared image edited by hand is not current")
-    click(ctx, "3. Run analysis")
+    click(ctx, "3 Analyse")
     expect_dialogs(ctx, t, [("info", "Analysis complete.")], "analysis after editing a prepared image")
     summary = read_csv(os.path.join(as_text(app.last_run_dir), "roi_summary.csv"))
     t.close(row_named(summary[1], "rect").get("C3_Channel_3_Mean"), 300.0, "the edited prepared image is not measured")
     t.check("was edited by hand" in as_text(app.status_area.getText()), "the user is told why the channels were prepared again")
 
     set_widgets(app.channel_panels[1], {"threshold_mode": "Display minimum"})
-    click(ctx, "1. Prepare enabled channels")
+    click(ctx, "1 Prepare channels")
     marker = app.prepared_images[2]
     on_edt(lambda: IJ.run(marker, "Add...", "value=10"), "editing the prepared marker image")
-    click(ctx, "3. Run analysis")
+    click(ctx, "3 Analyse")
     expect_dialogs(ctx, t, [("error", "do not press 'Apply'")], "display minimum on an edited prepared image")
     set_widgets(app.channel_panels[1], C2_VALUES)
 
@@ -1157,7 +1159,7 @@ def step_module_settings(ctx, t):
     t.equal(as_text(saved["depth_bin_width"]), "10", "saving again keeps the text module setting")
 
     use_as_source(ctx, ctx.imp1)
-    click(ctx, "3. Run analysis")
+    click(ctx, "3 Analyse")
     expect_dialogs(ctx, t, [("info", "Analysis complete.")], "analysis with the depth profile on")
     run_dir = as_text(app.last_run_dir)
     t.check(os.path.isfile(os.path.join(run_dir, "depth_profile.csv")), "the run writes depth_profile.csv")
@@ -1199,14 +1201,14 @@ def step_all_frames(ctx, t):
     ctx.imp3 = make_image("smoke frames.tif", frames=2, disks_per_frame=per_frame)
     use_as_source(ctx, ctx.imp3)
     on_edt(lambda: ctx.imp3.setPosition(1, 1, 2), "moving to frame 2")
-    click(ctx, "3. Run analysis")
+    click(ctx, "3 Analyse")
     expect_dialogs(ctx, t, [("info", "Analysis complete.")], "current frame only")
     summary = read_csv(os.path.join(as_text(app.last_run_dir), "roi_summary.csv"))
     t.equal([row.get("Frame") for row in summary[1]], ["2", "2"], "'Current frame only' analyzes the displayed frame")
     t.equal(row_named(summary[1], "rect").get("C1_DAPI_Object_Count"), "9", "frame 2 holds nine disks")
 
     on_edt(lambda: app.frame_mode_combo.setSelectedItem("All frames"), "choosing all frames")
-    click(ctx, "3. Run analysis")
+    click(ctx, "3 Analyse")
     expect_dialogs(ctx, t, [("info", "Analysis complete.")], "all frames")
     window = window_tables(as_text(app.last_run_dir))
     reference_image = make_image("smoke frames.tif", frames=2, disks_per_frame=per_frame)
@@ -1242,7 +1244,7 @@ def step_profile(ctx, t):
 
     on_edt(change_globals, "changing global settings")
     t.check(app.collect_global_options() != before_options, "the settings really changed")
-    click(ctx, "1. Prepare enabled channels")
+    click(ctx, "1 Prepare channels")
     on_edt(lambda: app.load_profile_from_path(path), "loading a profile")
     expect_dialogs(ctx, t, [], "loading a profile")
     after_options = app.collect_global_options()
@@ -1459,7 +1461,7 @@ def step_open_from_file(ctx, t):
     remember()
     if app.source_imp is not None:
         t.equal((app.source_imp.getNChannels(), app.source_imp.getNSlices()), (3, 2), "Bio-Formats reads the same dimensions")
-        click(ctx, "3. Run analysis")
+        click(ctx, "3 Analyse")
         expect_dialogs(ctx, t, [("info", "Analysis complete.")], "analysis of a file opened with Bio-Formats")
         summary = read_csv(os.path.join(as_text(app.last_run_dir), "roi_summary.csv"))
         t.equal(row_named(summary[1], "rect").get("C1_DAPI_Object_Count"), "4", "four disks in the file")
@@ -1592,7 +1594,7 @@ def step_batch_cancel(ctx, t):
     t.check(app.batch_running, "the batch is running")
     wait_until(lambda: app.batch_progress.getValue() >= 1 or not app.batch_running, 60.0, "the first batch image")
     progress_text = as_text(app.batch_progress.getString())
-    click(ctx, "3. Run analysis")
+    click(ctx, "3 Analyse")
     click(ctx, "Cancel batch")
     wait_for_batch(ctx)
     records = ctx.watcher.take()
@@ -1749,7 +1751,7 @@ def restore_parent_rois(ctx):
 
 
 def step_background_analysis(ctx, t):
-    """'3. Run analysis' works on a worker thread: the window keeps
+    """'3 Analyse' works on a worker thread: the window keeps
     answering while it runs, Cancel stops it, and its numbers equal a direct
     engine call."""
     app = ctx.app
@@ -1768,7 +1770,7 @@ def step_background_analysis(ctx, t):
     probe = TimerProbe()
     timer = SwingTimer(10, probe)
     on_edt(timer.start, "starting a Swing timer")
-    state = press_and_watch(ctx, "3. Run analysis", then=lambda: setattr(probe, "worker", app.batch_thread))
+    state = press_and_watch(ctx, "3 Analyse", then=lambda: setattr(probe, "worker", app.batch_thread))
     t.check(state.get("active") and state.get("running"), "the analysis is still running when the button press has returned")
     thread = state.get("thread")
     t.check(thread is not None and as_text(thread.getName()).startswith("cellquant-analysis"),
@@ -1776,6 +1778,12 @@ def step_background_analysis(ctx, t):
     t.check(thread is not None and as_text(thread.getName()) != as_text(state.get("edt")), "that thread is not the event thread")
     t.check(state.get("cancel"), "Cancel is enabled while the analysis runs")
     t.check(len(state.get("actions", [])) > 0 and True not in state["actions"], "the Analyses buttons are disabled while it runs")
+    # Changing the look while the analysis runs changes nothing about it
+    # (its numbers are compared with the engine's below).
+    remembered = ctx.ns["look_preference"]()
+    other = ctx.ns["LOOK_DARK"] if remembered != ctx.ns["LOOK_DARK"] else ctx.ns["LOOK_LIGHT"]
+    app.set_look(other)
+    app.set_look(remembered)
     # Questions to the event thread while the worker runs; an answer counts
     # when the worker was still running at the moment it was given.
     answers = []
@@ -1794,6 +1802,9 @@ def step_background_analysis(ctx, t):
     t.check(len(records) == 1 and records[0]["level"] == "info" and "Analysis complete." in records[0]["text"],
             "the analysis reports its end in one message box: " + repr(texts))
     t.check(probe.busy >= 3, "a Swing timer kept firing while the analysis ran (" + str(probe.busy) + " ticks)")
+    t.check(not app.job_progress.isVisible() and not app.job_cancel_button.isVisible(),
+            "after a change of look during the run, the job bar is hidden again at its end")
+    t.equal(ctx.ns["look_preference"](), remembered, "and the remembered look is the one chosen last")
     t.check(len(answers) >= 3 and max([answer[0] for answer in answers]) < 1.0,
             "the event thread answered within 1 s while the analysis ran (seconds, at): " + repr(answers))
     t.check(not app.job_cancel_button.isEnabled() and False not in [b.isEnabled() for b in app.analysis_action_buttons],
@@ -1809,7 +1820,7 @@ def step_background_analysis(ctx, t):
 
     # Cancel, pressed straight after the start.
     images_before = WindowManager.getImageCount()
-    state = press_and_watch(ctx, "3. Run analysis", then=lambda: app.job_cancel_button.doClick(0))
+    state = press_and_watch(ctx, "3 Analyse", then=lambda: app.job_cancel_button.doClick(0))
     t.check(state.get("active"), "the second analysis started")
     take_one(ctx, t, "Analysis cancelled.", "a cancelled analysis", ("info",))
     run_dir = as_text(app.last_run_dir)
@@ -1833,7 +1844,7 @@ def step_background_analysis(ctx, t):
     def edit_source():
         ctx.imp5.changes = True
 
-    press_and_watch(ctx, "3. Run analysis", then=edit_source)
+    press_and_watch(ctx, "3 Analyse", then=edit_source)
     records = take_one(ctx, t, "Analysis complete.", "an analysis whose source was edited while it ran", ("warning",))
     t.check(len(records) == 1 and "the pixels of the source image were edited" in records[0]["text"],
             "the closing message names the change: " + repr([r["text"] for r in records]))
@@ -1904,8 +1915,9 @@ def step_analyses_tab(ctx, t):
                 t.check(isinstance(widget, JTextField), key + " is a text field")
                 t.equal(as_text(widget.getText()), as_text(defaults.get(key)), key + ": shows its default")
     t.equal(sorted(app.module_widgets.keys()), sorted(keys), "one control per field and no other")
-    borders = [as_text(panel.getBorder().getTitle()) for panel in find_components(tab, JPanel)
-               if isinstance(panel.getBorder(), TitledBorder)]
+    # Each form is one section (a card) of the tab, under the form's title.
+    borders = [as_text(panel.getClientProperty("cellquant.section")) for panel in find_components(tab, JPanel)
+               if panel.getClientProperty("cellquant.section") is not None]
     for form in forms:
         t.check(as_text(form["title"]) in borders, "a section titled '" + as_text(form["title"]) + "'")
     for function, label in ANALYSIS_ACTIONS:
@@ -2249,15 +2261,15 @@ def step_other_actions(ctx, t):
     click(ctx, "Clear ROI Manager")
     expect_dialogs(ctx, t, [("question", "Clear all ROIs")], "'Clear ROI Manager'")
     t.equal(ctx.manager.getCount(), 0, "the ROIs are cleared")
-    click(ctx, "3. Run analysis")
+    click(ctx, "3 Analyse")
     expect_dialogs(ctx, t, [("error", "ROI Manager contains no parent ROIs")], "analysis with an empty ROI Manager")
     on_edt(lambda: app.roi_source_combo.setSelectedItem("Whole image"), "choosing the whole image")
-    click(ctx, "3. Run analysis")
+    click(ctx, "3 Analyse")
     expect_dialogs(ctx, t, [("info", "Analysis complete.")], "whole-image analysis")
     summary = read_csv(os.path.join(as_text(app.last_run_dir), "roi_summary.csv"))
     t.equal([row.get("Parent_ROI_Name") for row in summary[1]], ["Whole_Image"], "the whole image is one parent ROI")
 
-    click(ctx, "1. Prepare enabled channels")
+    click(ctx, "1 Prepare channels")
     generated = list(app.generated_ids)
     t.check(len(generated) >= 3, "generated images are tracked")
     click(ctx, "Close generated images")
@@ -2276,7 +2288,7 @@ def step_other_actions(ctx, t):
     expect_dialogs(ctx, t, [("warning", "Close every open image")], "'Close all ImageJ images'")
     t.equal(WindowManager.getImageCount(), 0, "every image is closed")
     t.check(app.source_imp is None, "the source is forgotten")
-    click(ctx, "2. Preview all masks")
+    click(ctx, "2 Preview masks")
     expect_dialogs(ctx, t, [("error", "No source image is selected")], "previewing with no image")
 
 
@@ -2339,6 +2351,147 @@ def step_fewer_channels(ctx, t):
         settle(ctx)
 
 
+def lut_composite(title, colors):
+    """A small composite image with one channel per color, each with a
+    lookup table of that color."""
+    stack = ImageStack(64, 48)
+    for index in range(len(colors)):
+        plane = ShortProcessor(64, 48)
+        plane.setValue(100.0 * (index + 1))
+        plane.fill()
+        stack.addSlice("", plane)
+    imp = ImagePlus(title, stack)
+    imp.setDimensions(len(colors), 1, 1)
+    imp = CompositeImage(imp, CompositeImage.COMPOSITE)
+    for index in range(len(colors)):
+        imp.setChannelLut(LUT.createLutFromColor(colors[index]), index + 1)
+    cal = imp.getCalibration()
+    cal.pixelWidth = 0.5
+    cal.pixelHeight = 0.5
+    cal.setUnit("um")
+    return imp
+
+
+def write_channel_tiff(path, channels):
+    """An OME-TIFF of one 16-bit plane per channel whose metadata names the
+    channels and gives their excitation and emission wavelengths and colors.
+    channels: (name, excitation, emission, (red, green, blue)) each."""
+    from loci.formats import ImageWriter, MetadataTools
+    from loci.common import DataTools
+    from ome.units import UNITS
+    from ome.units.quantity import Length
+    from ome.xml.model.primitives import Color as OmeColor
+    metadata = MetadataTools.createOMEXMLMetadata()
+    MetadataTools.populateMetadata(metadata, 0, "channels", True, "XYCZT", "uint16", 64, 48, 1, len(channels), 1, 1)
+    for index in range(len(channels)):
+        name, excitation, emission, rgb = channels[index]
+        metadata.setChannelName(name, 0, index)
+        metadata.setChannelExcitationWavelength(Length(excitation, UNITS.NANOMETER), 0, index)
+        metadata.setChannelEmissionWavelength(Length(emission, UNITS.NANOMETER), 0, index)
+        metadata.setChannelColor(OmeColor(rgb[0], rgb[1], rgb[2], 255), 0, index)
+    writer = ImageWriter()
+    writer.setMetadataRetrieve(metadata)
+    try:
+        writer.setId(path)
+        for index in range(len(channels)):
+            plane = ShortProcessor(64, 48)
+            plane.setValue(200.0 * (index + 1))
+            plane.fill()
+            writer.saveBytes(index, DataTools.shortsToBytes(plane.getPixels(), True))
+    finally:
+        writer.close()
+
+
+def step_source_channels(ctx, t):
+    """The Session tab lists the channels of the source image: the colors of
+    the open image's lookup tables, and the names, wavelengths and colors
+    the file's metadata gives; beside each, what the window will do with
+    it; and a quiet warning when a channel called DAPI does not fit."""
+    ns = ctx.ns
+    # The pure helpers first.
+    t.equal([as_text(ns["color_word"](color)) for color in [
+        Color(0, 0, 255), Color(0, 255, 0), Color(255, 0, 255), Color(255, 0, 0), Color(0, 255, 255), Color(128, 128, 128)
+    ]], ["blue", "green", "magenta", "red", "cyan", "gray"], "display colors are named plainly")
+    infos = [{"channel": 1, "excitation": 633.0, "emission": None, "name": ""},
+             {"channel": 2, "excitation": 561.0, "emission": None, "name": ""},
+             {"channel": 3, "excitation": 405.0, "emission": None, "name": ""}]
+    right = {1: {"name": "HOPX", "enabled": True}, 2: {"name": "PAX6", "enabled": True}, 3: {"name": "DAPI", "enabled": True}}
+    wrong = {1: {"name": "HOPX", "enabled": True}, 2: {"name": "DAPI", "enabled": True}, 3: {"name": "Nuclei", "enabled": True}}
+    t.equal(ns["channel_name_warnings"](infos, right), [], "a DAPI channel excited at 405 nm gives no warning")
+    warned = [as_text(line) for line in ns["channel_name_warnings"](infos, wrong)]
+    t.equal(len(warned), 2, "a DAPI name on the 561 nm channel gives two warnings: " + repr(warned))
+    t.check(len(warned) == 2 and warned[0].startswith("C2 is called DAPI") and "561 nm" in warned[0],
+            "the first says that C2 is called DAPI but is excited at 561 nm")
+    t.check(len(warned) == 2 and warned[1].startswith("C3 is excited at 405 nm") and "C2 is called DAPI" in warned[1],
+            "the second points at the 405 nm channel")
+    unknown = [{"channel": 1, "excitation": None, "emission": None, "name": ""}]
+    t.equal(ns["channel_name_warnings"](unknown, {1: {"name": "DAPI", "enabled": True}}), [],
+            "without wavelengths nothing is guessed")
+    off = {1: {"name": "HOPX", "enabled": True}, 2: {"name": "DAPI", "enabled": False}, 3: {"name": "Nuclei", "enabled": True}}
+    t.equal(ns["channel_name_warnings"](infos, off), [], "a channel that is not used is not checked")
+
+    launch = ns["launch_cell_quant_studio"]
+    app = on_edt(launch, "opening a window", 60.0)
+    settle(ctx)
+    ctx.app = app
+    colored = lut_composite("smoke colors.tif", [Color(0, 0, 255), Color(0, 255, 0), Color(255, 0, 255)])
+    path = os.path.join(ctx.tmp, "smoke channels.ome.tif")
+    opened = None
+    try:
+        # From the open image: the colors of its lookup tables.
+        use_as_source(ctx, colored)
+        settle(ctx)
+        on_edt(lambda: app.main_tabs.setSelectedIndex(0), "showing the Session tab")
+        set_widgets(app.channel_panels[0], {"enabled": True, "name": "Nuclei", "analysis_mode": "Objects + area"})
+        set_widgets(app.channel_panels[2], {"enabled": False})
+        on_edt(app.refresh_channel_list, "listing the channels")
+        lines = [as_text(line) for line in on_edt(app.channel_list_lines, "reading the channel list")]
+        t.equal(len(lines), 3, "one line per channel of the image: " + repr(lines))
+        t.check(len(lines) == 3 and lines[0].startswith("C1: blue") and lines[0].endswith("| Nuclei, Objects + area"),
+                "C1 is blue in the image and counted as Nuclei here: " + (lines[0] if lines else ""))
+        t.check(len(lines) == 3 and lines[1].startswith("C2: green"), "C2 is green in the image")
+        t.check(len(lines) == 3 and lines[2].startswith("C3: magenta") and lines[2].endswith("| not used"),
+                "C3 is magenta in the image and not used here")
+        t.check(len(lines) == 3 and "no file metadata" in lines[0], "an image without a file says it has no file metadata")
+        t.check(app.channel_list.isShowing(), "the list is on the Session tab")
+        t.check(app.channel_tabs.getTitleAt(0) == "C1 Nuclei", "the tab of C1 is titled with its name: " +
+                as_text(app.channel_tabs.getTitleAt(0)))
+        # From a file: names, wavelengths and colors of the metadata.
+        set_widgets(app.channel_panels[1], {"name": "Marker"})
+        write_channel_tiff(path, [("Hoechst", 405.0, 461.0, (0, 0, 255)), ("AF568", 561.0, 603.0, (255, 0, 0))])
+        on_edt(lambda: app.open_image_path(path, True), "opening the OME-TIFF", 60.0)
+        opened = app.source_imp
+        wait_until(lambda: len(app.source_channels) == 2 and app.source_channels[0].get("from_file"), 30.0,
+                   "the file's channel metadata")
+        lines = [as_text(line) for line in on_edt(app.channel_list_lines, "reading the channel list")]
+        t.check(len(lines) == 2 and lines[0].startswith("C1: Hoechst - ex 405 / em 461 nm - blue"),
+                "C1 comes with its name, wavelengths and color from the file: " + (lines[0] if lines else ""))
+        t.check(len(lines) == 2 and lines[1].startswith("C2: AF568 - ex 561 / em 603 nm - red"),
+                "C2 too: " + (lines[1] if len(lines) > 1 else ""))
+        t.check(not app.channel_warning_note.isVisible(), "names that fit the file give no warning")
+        set_widgets(app.channel_panels[1], {"enabled": True, "name": "DAPI", "analysis_mode": "Objects + area"})
+        on_edt(app.refresh_channel_list, "listing the channels")
+        note = as_text(app.channel_warning_note.getText())
+        t.check(app.channel_warning_note.isVisible() and "C2 is called DAPI" in note and "561 nm" in note,
+                "a channel called DAPI at 561 nm is pointed out: " + note)
+        t.check("C1 is excited at 405 nm" in note, "and so is the 405 nm channel with another name")
+        # A warning on the status line stays visible until the run log is opened.
+        app.append_status("Warning: a test warning")
+        settle(ctx)
+        t.equal(as_text(app.log_button.getText()), "Show run log (1 warning)", "the log button counts the warnings")
+        on_edt(app.toggle_run_log, "opening the run log")
+        on_edt(app.toggle_run_log, "closing the run log")
+        t.equal(as_text(app.log_button.getText()), "Show run log", "and is a plain link again once the log was read")
+        expect_dialogs(ctx, t, [], "listing the channels")
+    finally:
+        for imp in [colored, opened]:
+            if imp is not None:
+                imp.changes = False
+                on_edt(imp.close, "closing a test image")
+        on_edt(app.dispose, "closing the window")
+        settle(ctx)
+
+
 def step_look(ctx, t):
     """The dark look applies to the whole of Fiji, so it must be gone again
     once the window has closed; and the small helpers of the Results tab."""
@@ -2362,74 +2515,127 @@ def step_look(ctx, t):
 
     before = UIManager.getLookAndFeel()
     state = ns["LOOK_STATE"]
+    key = ns["LOOK_PREF_KEY"]
     t.check(not state["active"], "no look is switched on while no window is open")
-    launch = ns["launch_cell_quant_studio"]
-    window = on_edt(launch, "opening a window", 60.0)
-    settle(ctx)
-    wanted = ns["look_preference"]()
-    if state["active"]:
-        t.check(UIManager.getLookAndFeel() is not before, "the chosen look is on while the window is open")
-        t.equal(ns["look_is_dark"](), wanted == ns["LOOK_DARK"], "it is dark exactly when Dark is chosen")
-        for kind in ["ui", "ui_bold", "figure"]:
-            t.check(kind in ns["LOOK_FONTS"], "the bundled font '" + kind + "' is loaded")
-        t.check(ns["look_font"]("figure", 20).getSize() == 20, "look_font gives the asked size")
-        t.equal(as_text(window.look_combo.getSelectedItem()), wanted, "the title row shows the look in use")
-        t.equal(state["name"], wanted, "the look in use is the remembered choice")
-        # Switching the look while the window is open: Fiji gets its own look
-        # back at once, the tabs are shaped again for the other font, and
-        # the labels keep their texts.
-        some_label = [item for item in find_components(window, Component)
-                      if as_text(type(item).__name__) == "JLabel" and item.getClientProperty("cellquant.text") is not None][0]
-        label_text = as_text(some_label.getClientProperty("cellquant.text"))
-        on_edt(lambda: window.look_combo.setSelectedItem(ns["LOOK_FIJI"]), "choosing Fiji's look")
+    saved = Prefs.get(key, "")
+    try:
+        # Every remembered choice is kept; something unknown opens Light.
+        Prefs.set(key, ns["LOOK_FIJI"])
+        t.equal(ns["look_preference"](), ns["LOOK_FIJI"], "a remembered 'Fiji default' stays Fiji default")
+        Prefs.set(key, "Neon")
+        t.equal(ns["look_preference"](), ns["LOOK_LIGHT"], "an unknown remembered look opens Light")
+        Prefs.set(key, ns["LOOK_DARK"])
+        t.equal(ns["look_preference"](), ns["LOOK_DARK"], "Dark stays Dark")
+        window = on_edt(ns["launch_cell_quant_studio"], "opening a window", 60.0)
         settle(ctx)
-        t.check(not state["active"] and UIManager.getLookAndFeel() is before, "'Fiji default' gives Fiji its look back at once")
-        on_edt(lambda: window.look_combo.setSelectedItem(wanted), "choosing the remembered look again")
-        settle(ctx)
-        t.check(state["active"] and state["name"] == wanted, "and the window's look comes back")
-        # Both looks of the window, one after the other: each has its own
-        # palette, the filled button takes its accent, and the Results tab
-        # is painted on its background.
-        t.equal([as_text(window.look_combo.getItemAt(index)) for index in range(window.look_combo.getItemCount())],
-                ["Dark", "Light", "Fiji default"], "the title row offers Dark, Light and Fiji default")
-        run_button = button_labelled(window, "3. Run analysis")
-        for name in [ns["LOOK_LIGHT"], ns["LOOK_DARK"]]:
-            on_edt(lambda: window.look_combo.setSelectedItem(name), "choosing " + name)
+        if state["active"]:
+            t.check(UIManager.getLookAndFeel() is not before, "the window's look is on while the window is open")
+            t.equal(state["name"], ns["LOOK_DARK"], "the window opens in the remembered look")
+            t.check(ns["look_is_dark"](), "and it is dark")
+            switch = window.look_switch
+            t.check(switch.buttons[ns["LOOK_DARK"]].isSelected(), "the Light | Dark | Fiji switch shows Dark")
+            t.check(window.look_combo is switch, "look_combo still names the look choice")
+            t.equal(as_text(window.look_combo.getSelectedItem()), ns["LOOK_DARK"], "the title row shows the look in use")
+            t.equal([as_text(window.look_combo.getItemAt(index)) for index in range(window.look_combo.getItemCount())],
+                    ["Light", "Dark", "Fiji default"], "the title row offers Light, Dark and Fiji default")
+            t.equal([as_text(switch.buttons[name].getText()) for name in ns["LOOK_NAMES"]],
+                    ["Light", "Dark", "Fiji"], "the segments say Light, Dark and Fiji")
+            t.check(switch.buttons[ns["LOOK_DARK"]].getFont() != switch.buttons[ns["LOOK_LIGHT"]].getFont(),
+                    "the chosen segment's text is set off from the others")
+            for kind in ["ui", "ui_bold", "figure"]:
+                t.check(kind in ns["LOOK_FONTS"], "the bundled font '" + kind + "' is loaded")
+            t.check(ns["look_font"]("figure", 20).getSize() == 20, "look_font gives the asked size")
+            family = ns["look_ui_family"]()
+            if family is not None and not as_text(family).startswith("."):
+                t.equal(as_text(UIManager.getFont("Label.font").getFamily()), as_text(family),
+                        "the interface uses the platform's interface font")
+            # The switch itself, pressed the way a user presses it.
+            on_edt(lambda: switch.buttons[ns["LOOK_LIGHT"]].doClick(0), "pressing Light")
             settle(ctx)
-            palette = ns["LOOK_PALETTES"][name]
-            dark = name == ns["LOOK_DARK"]
-            t.check(state["active"] and state["name"] == name, name + " is switched on from the title row")
-            t.equal(ns["look_is_dark"](), dark, name + ": the window is dark exactly when Dark is chosen")
-            t.check(ns["look_palette"]() is palette, name + ": the painted parts use the palette of this look")
-            t.check(palette["primary"] in as_text(run_button.getClientProperty("FlatLaf.style")),
-                    name + ": the filled button has the accent of this look")
-            corner = on_edt(lambda: painted_corner(ns["ResultsCanvas"]()), "painting the Results tab")
-            t.equal(corner < 384, dark, name + ": the Results tab is painted on the background of this look")
-            t.equal(as_text(some_label.getClientProperty("cellquant.text")), label_text, name + ": labels keep their text")
-        on_edt(lambda: window.look_combo.setSelectedItem(wanted), "choosing the remembered look once more")
+            t.check(state["active"] and state["name"] == ns["LOOK_LIGHT"], "pressing Light switches to the light look")
+            t.check(not ns["look_is_dark"](), "and it is light")
+            t.equal(as_text(Prefs.get(key, "")), ns["LOOK_LIGHT"], "and the choice is remembered")
+            on_edt(lambda: window.set_look(ns["LOOK_DARK"]), "choosing Dark")
+            settle(ctx)
+            t.check(state["active"] and state["name"] == ns["LOOK_DARK"] and ns["look_is_dark"](), "set_look switches to Dark")
+            t.check(switch.buttons[ns["LOOK_DARK"]].isSelected(), "and the switch follows")
+            t.equal(ns["look_preference"](), ns["LOOK_DARK"], "the remembered choice is Dark")
+            t.check(UIManager.getLookAndFeel() is not before, "Fiji keeps the window's look while it is open")
+            # Fiji default gives Fiji its own look back at once, and is remembered.
+            on_edt(lambda: switch.buttons[ns["LOOK_FIJI"]].doClick(0), "pressing Fiji")
+            settle(ctx)
+            t.check(not state["active"] and UIManager.getLookAndFeel() is before, "'Fiji default' gives Fiji its look back at once")
+            t.equal(ns["look_preference"](), ns["LOOK_FIJI"], "and 'Fiji default' is remembered")
+            corner = on_edt(lambda: painted_corner(ns["ResultsCanvas"]()), "painting the Results tab under Fiji's look")
+            t.equal(corner < 384, ns["look_is_dark"](), "under Fiji's look the Results tab follows Fiji's background")
+            on_edt(lambda: window.look_combo.setSelectedItem(ns["LOOK_DARK"]), "choosing Dark again")
+            settle(ctx)
+            t.check(state["active"] and state["name"] == ns["LOOK_DARK"], "and the window's look comes back")
+            # Both looks of the window, one after the other: each has its own
+            # palette, the filled button takes its colors, the quiet buttons
+            # their link color, and the Results tab is painted on its background.
+            run_button = button_labelled(window, "3 Analyse")
+            for name in [ns["LOOK_LIGHT"], ns["LOOK_DARK"]]:
+                on_edt(lambda: window.look_combo.setSelectedItem(name), "choosing " + name)
+                settle(ctx)
+                palette = ns["LOOK_PALETTES"][name]
+                dark = name == ns["LOOK_DARK"]
+                t.check(state["active"] and state["name"] == name, name + " is switched on from the title row")
+                t.equal(ns["look_is_dark"](), dark, name + ": the window is dark exactly when Dark is chosen")
+                t.check(ns["look_palette"]() is palette, name + ": the painted parts use the palette of this look")
+                t.check(palette["primary"] in as_text(run_button.getClientProperty("FlatLaf.style")),
+                        name + ": the filled button has the colors of this look")
+                corner = on_edt(lambda: painted_corner(ns["ResultsCanvas"]()), "painting the Results tab")
+                t.equal(corner < 384, dark, name + ": the Results tab is painted on the background of this look")
+                quiet = [item for item in find_components(window, JButton)
+                         if as_text(item.getClientProperty("cellquant.kind") or "") == "quiet"]
+                link = as_text(ns["look_hex_text"](palette["link"]))
+                t.check(len(quiet) > 0 and link in as_text(quiet[0].getClientProperty("FlatLaf.style")),
+                        name + ": the quiet buttons are in the link color of this look")
+        else:
+            t.check(UIManager.getLookAndFeel() is before, "without a look of its own nothing about Fiji changes")
+        # Text that does not fit is shortened, never drawn past its room.
+        pen = BufferedImage(10, 10, BufferedImage.TYPE_INT_RGB).createGraphics()
+        wide = pen.getFontMetrics().stringWidth("a rather long caption for a small card")
+        t.check(0 < ns["paint_fitted"](pen, "a rather long caption for a small card", 0, 9, wide // 2) <= wide // 2,
+                "a caption that is too long is shortened to its room")
+        t.equal(ns["paint_fitted"](pen, "short", 0, 9, 500), pen.getFontMetrics().stringWidth("short"), "a caption that fits is drawn whole")
+        t.equal(ns["paint_fitted"](pen, "anything", 0, 9, 0), 0, "nothing is drawn where there is no room")
+        t.equal(as_text(ns["fit_text"](pen, "short", 500)), "short", "fit_text leaves a text that fits as it is")
+        shortened = as_text(ns["fit_text"](pen, "a rather long caption for a small card", wide // 2))
+        t.check(shortened.endswith("...") and pen.getFontMetrics().stringWidth(shortened) <= wide // 2,
+                "fit_text shortens a long text with three dots, to its room")
+        t.equal(as_text(ns["fit_text"](pen, "anything", 0)), "", "fit_text gives nothing where there is no room")
+        pen.dispose()
+        extras = state["extras"]
+        on_edt(window.dispose, "closing the window")
         settle(ctx)
-        t.check(state["active"] and state["name"] == wanted, "after both, the remembered look is on again")
-        t.equal(as_text(some_label.getClientProperty("cellquant.text")), label_text, "labels keep their text through both changes")
-        t.equal(ns["look_preference"](), wanted, "the remembered choice is as it was")
-    else:
-        t.check(UIManager.getLookAndFeel() is before, "without a look of its own nothing about Fiji changes")
-    # Text that does not fit is shortened, never drawn past its room.
-    pen = BufferedImage(10, 10, BufferedImage.TYPE_INT_RGB).createGraphics()
-    wide = pen.getFontMetrics().stringWidth("a rather long caption for a small card")
-    t.check(0 < ns["paint_fitted"](pen, "a rather long caption for a small card", 0, 9, wide // 2) <= wide // 2,
-            "a caption that is too long is shortened to its room")
-    t.equal(ns["paint_fitted"](pen, "short", 0, 9, 500), pen.getFontMetrics().stringWidth("short"), "a caption that fits is drawn whole")
-    t.equal(ns["paint_fitted"](pen, "anything", 0, 9, 0), 0, "nothing is drawn where there is no room")
-    t.equal(as_text(ns["fit_text"](pen, "short", 500)), "short", "fit_text leaves a text that fits as it is")
-    shortened = as_text(ns["fit_text"](pen, "a rather long caption for a small card", wide // 2))
-    t.check(shortened.endswith("...") and pen.getFontMetrics().stringWidth(shortened) <= wide // 2,
-            "fit_text shortens a long text with three dots, to its room")
-    t.equal(as_text(ns["fit_text"](pen, "anything", 0)), "", "fit_text gives nothing where there is no room")
-    pen.dispose()
-    on_edt(window.dispose, "closing the window")
-    settle(ctx)
-    wait_until(lambda: not state["active"], 10.0, "the look to be put back")
-    t.check(UIManager.getLookAndFeel() is before, "Fiji has its own look again after the window closed")
+        wait_until(lambda: not state["active"], 10.0, "the look to be put back")
+        t.check(UIManager.getLookAndFeel() is before, "Fiji has its own look again after the window closed")
+        try:
+            from com.formdev.flatlaf import FlatLaf
+            t.check(FlatLaf.getGlobalExtraDefaults() is extras, "FlatLaf's global extra defaults are put back")
+        except ImportError:
+            pass
+        # The next window opens in the last choice.
+        Prefs.set(key, ns["LOOK_LIGHT"])
+        window = on_edt(ns["launch_cell_quant_studio"], "opening a window again", 60.0)
+        settle(ctx)
+        if state["active"]:
+            t.equal(state["name"], ns["LOOK_LIGHT"], "the next window opens in the remembered Light look")
+        on_edt(window.dispose, "closing the window")
+        settle(ctx)
+        wait_until(lambda: not state["active"], 10.0, "the look to be put back")
+        # A remembered Fiji default opens the window in Fiji's own look.
+        Prefs.set(key, ns["LOOK_FIJI"])
+        window = on_edt(ns["launch_cell_quant_studio"], "opening a window in Fiji's look", 60.0)
+        settle(ctx)
+        t.check(not state["active"] and UIManager.getLookAndFeel() is before, "a remembered Fiji default leaves Fiji's look alone")
+        t.check(window.look_switch.buttons[ns["LOOK_FIJI"]].isSelected(), "and the switch shows Fiji")
+        on_edt(window.dispose, "closing the window")
+        settle(ctx)
+    finally:
+        Prefs.set(key, saved)
     expect_dialogs(ctx, t, [], "switching the look")
 
 
@@ -2445,6 +2651,108 @@ def painted_corner(canvas):
         pen.dispose()
     pixel = image.getRGB(3, 3)
     return ((pixel >> 16) & 255) + ((pixel >> 8) & 255) + (pixel & 255)
+
+
+# -----------------------------------------------------------------------------
+# No text is cut off
+# -----------------------------------------------------------------------------
+
+def inside_renderer(item):
+    parent = item.getParent()
+    while parent is not None:
+        if isinstance(parent, CellRendererPane):
+            return True
+        parent = parent.getParent()
+    return False
+
+
+def text_cut(item):
+    """Why the text of a label, check box or button that is showing is not
+    shown whole, or None. Measured the way Swing lays the text out."""
+    text = as_text(item.getText() or "")
+    if text.strip() == "" or text.startswith("<html>"):
+        return None
+    wanted = item.getPreferredSize()
+    if item.getWidth() < wanted.width:
+        return "%d pixels wide but needs %d" % (item.getWidth(), wanted.width)
+    insets = item.getInsets()
+    room = Rectangle(insets.left, insets.top, item.getWidth() - insets.left - insets.right,
+                     item.getHeight() - insets.top - insets.bottom)
+    icon = item.getIcon()
+    if icon is None and isinstance(item, JCheckBox):
+        icon = UIManager.getIcon("CheckBox.icon")
+    shown = SwingUtilities.layoutCompoundLabel(
+        item, item.getFontMetrics(item.getFont()), text, icon, item.getVerticalAlignment(), item.getHorizontalAlignment(),
+        item.getVerticalTextPosition(), item.getHorizontalTextPosition(), room, Rectangle(), Rectangle(), item.getIconTextGap()
+    )
+    if as_text(shown) != text:
+        return "shown as '" + as_text(shown) + "'"
+    return None
+
+
+def cut_texts(window, where, measured=None):
+    found = []
+    for item in find_components(window, Component):
+        if not isinstance(item, (JLabel, AbstractButton)) or not item.isShowing() or inside_renderer(item):
+            continue
+        if item.getClientProperty("cellquant.elides") is not None:
+            continue
+        if measured is not None:
+            measured.append(item)
+        why = text_cut(item)
+        if why is not None:
+            found.append(where + ": '" + as_text(item.getText()) + "' " + why)
+    return found
+
+
+def step_text_fits(ctx, t):
+    """In both looks, at the usual and at the smallest window size, every
+    label, check box and button of every tab shows its whole text."""
+    ns = ctx.ns
+    key = ns["LOOK_PREF_KEY"]
+    saved = Prefs.get(key, "")
+    window = on_edt(ns["launch_cell_quant_studio"], "opening a window", 60.0)
+    settle(ctx)
+    shown = lut_composite("smoke text fit.tif", [Color(0, 0, 255), Color(0, 255, 0), Color(255, 0, 255), Color(255, 0, 0)])
+    try:
+        # With an image, so that its summary and its channels are measured too.
+        on_edt(shown.show, "showing an image")
+        on_edt(lambda: window.use_image_as_source(shown), "using it as the source")
+        settle(ctx)
+        t.check(window.channel_list.getComponentCount() > 8, "the Session tab lists the channels of the image")
+        # The measurement itself finds a text that is cut.
+        probe = JLabel("a label far too long for its place")
+        probe.setBounds(0, 0, 40, 20)
+        t.check(text_cut(probe) is not None, "a cut text is found: " + repr(text_cut(probe)))
+        least = window.getMinimumSize()
+        t.equal((least.width, least.height), (1120, 760), "the smallest window size")
+        for look in [ns["LOOK_LIGHT"], ns["LOOK_DARK"]]:
+            on_edt(lambda: window.set_look(look), "choosing " + look)
+            settle(ctx)
+            for size in [(1440, 900), (1120, 760)]:
+                on_edt(lambda: window.setSize(size[0], size[1]), "resizing the window")
+                settle(ctx)
+                tabs = window.main_tabs
+                problems = []
+                measured = []
+                for index in range(tabs.getTabCount()):
+                    on_edt(lambda: tabs.setSelectedIndex(index), "showing a tab")
+                    settle(ctx)
+                    # Wrapped texts take their height in a second layout pass.
+                    on_edt(window.validate, "laying the window out")
+                    settle(ctx)
+                    where = "%s, %dx%d, %s" % (look, size[0], size[1], as_text(tabs.getTitleAt(index)))
+                    problems.extend(on_edt(lambda: cut_texts(window, where, measured), "measuring the texts"))
+                t.check(len(measured) > 150, "the texts of every tab are measured (%d)" % len(measured))
+                t.check(len(problems) == 0, "no text is cut off (%s, %dx%d): %s" % (look, size[0], size[1], "; ".join(problems)))
+        on_edt(lambda: window.main_tabs.setSelectedIndex(0), "back to the Session tab")
+    finally:
+        shown.changes = False
+        on_edt(shown.close, "closing the image")
+        on_edt(window.dispose, "closing the window")
+        settle(ctx)
+        Prefs.set(key, saved)
+    expect_dialogs(ctx, t, [], "measuring the texts")
 
 
 def step_source_rules(ctx, t):
@@ -2490,7 +2798,9 @@ STEPS = [
     ("ROI, cleanup, and reset actions", step_other_actions),
     ("close and relaunch", step_relaunch),
     ("an image with fewer channels keeps the other channels' settings", step_fewer_channels),
-    ("the Dark and Light looks, Fiji's own put back; Results tab helpers", step_look),
+    ("the channels of the source image: colors, wavelengths, names; DAPI check", step_source_channels),
+    ("the look: Light | Dark | Fiji switch, remembered, put back; Results tab helpers", step_look),
+    ("no text is cut off, in both looks and at the smallest size", step_text_fits),
     ("source rules", step_source_rules)
 ]
 
