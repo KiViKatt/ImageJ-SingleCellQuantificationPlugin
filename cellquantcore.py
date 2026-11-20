@@ -2458,7 +2458,7 @@ class ResultsCanvas(JPanel):
         if unit == "percent":
             words = "Full circle = 100% of the region's area"
         else:
-            words = "Full circle = the largest region (" + format_metric(highest, unit) + ")"
+            words = "Full circle = the highest value (" + format_metric(highest, unit) + ")"
         graphics.setFont(look_font("ui", 12))
         graphics.setColor(faint)
         baseline = shape["y"] + shape["outer"] + 24
