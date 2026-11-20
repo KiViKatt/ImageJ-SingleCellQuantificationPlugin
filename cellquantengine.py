@@ -27,7 +27,7 @@ from ij.gui import Roi, Overlay, OvalRoi
 from ij.process import ImageProcessor, LUT, AutoThresholder, ByteProcessor, FloatProcessor, Blitter
 from ij.io import FileSaver, RoiDecoder, RoiEncoder
 
-from java.awt import Color
+from java.awt import Color, GraphicsEnvironment
 from java.io import (
     FileInputStream, FileOutputStream, BufferedInputStream, BufferedOutputStream,
     ByteArrayOutputStream, DataOutputStream
@@ -357,6 +357,13 @@ def safe_close_image(imp):
                 win.close()
         except ANY_ERROR:
             pass
+
+
+def is_headless():
+    try:
+        return bool(GraphicsEnvironment.isHeadless())
+    except ANY_ERROR:
+        return False
 
 
 def clone_roi(roi):
@@ -1034,6 +1041,11 @@ class AnalysisEngine(object):
     def __init__(self, log=None, is_cancelled=None):
         self._log = log
         self._is_cancelled = is_cancelled
+        # Object outlines normally come back through a hidden ROI Manager.
+        # A ROI Manager is a window class and cannot be created when Fiji
+        # runs without a display, so there the outlines are collected from
+        # an image overlay instead. Both routes give the same outlines.
+        self.collect_rois_from_overlay = is_headless()
 
     def log(self, message):
         if self._log is not None:
@@ -1242,14 +1254,24 @@ class AnalysisEngine(object):
                 safe_close_image(work)
                 raise ValueError("Unsupported threshold mode: " + threshold_mode)
 
-            threshold_low = max(work_data_min, threshold_low)
-            threshold_high = min(work_data_max, threshold_high)
-            if threshold_high < threshold_low:
-                safe_close_image(work)
-                raise ValueError("Threshold upper value is below the lower value for C" + str(config["channel"]) + ".")
-
-            work.getProcessor().setThreshold(threshold_low, threshold_high, ImageProcessor.NO_LUT_UPDATE)
-            mask_processor = work.createThresholdMask()
+            if threshold_low > work_data_max or threshold_high < work_data_min:
+                # The whole threshold range lies outside the pixel values of
+                # this image (a blank or very dim channel, a negative control).
+                # Nothing is positive: the mask is empty, not an error.
+                mask_processor = ByteProcessor(work.getWidth(), work.getHeight())
+                self.log(
+                    "C" + str(config["channel"]) + " (" + config["name"] + "): the threshold range " +
+                    str(threshold_low) + " to " + str(threshold_high) + " lies outside the image values " +
+                    str(work_data_min) + " to " + str(work_data_max) + "; nothing is positive."
+                )
+            else:
+                threshold_low = max(work_data_min, threshold_low)
+                threshold_high = min(work_data_max, threshold_high)
+                if threshold_high < threshold_low:
+                    safe_close_image(work)
+                    raise ValueError("Threshold upper value is below the lower value for C" + str(config["channel"]) + ".")
+                work.getProcessor().setThreshold(threshold_low, threshold_high, ImageProcessor.NO_LUT_UPDATE)
+                mask_processor = work.createThresholdMask()
             raw = ImagePlus(title_prefix + "_RAW_MASK", mask_processor)
             raw.setCalibration(prepared_imp.getCalibration().copy())
             safe_close_image(work)
@@ -1380,9 +1402,13 @@ class AnalysisEngine(object):
         work_imp.setCalibration(mask_imp.getCalibration().copy())
 
         result_table = ResultsTable()
-        temp_manager = RoiManager(False)
-
-        options = ParticleAnalyzer.SHOW_NONE | ParticleAnalyzer.ADD_TO_MANAGER
+        use_overlay = self.collect_rois_from_overlay
+        temp_manager = None
+        if use_overlay:
+            options = ParticleAnalyzer.SHOW_OVERLAY_OUTLINES
+        else:
+            temp_manager = RoiManager(False)
+            options = ParticleAnalyzer.SHOW_NONE | ParticleAnalyzer.ADD_TO_MANAGER
         if config["include_holes"]:
             options |= ParticleAnalyzer.INCLUDE_HOLES
         if config["composite_rois"]:
@@ -1402,7 +1428,8 @@ class AnalysisEngine(object):
         work_ip.setThreshold(255, 255, ImageProcessor.NO_LUT_UPDATE)
 
         try:
-            ParticleAnalyzer.setRoiManager(temp_manager)
+            if not use_overlay:
+                ParticleAnalyzer.setRoiManager(temp_manager)
             analyzer = ParticleAnalyzer(
                 options, measurements, result_table,
                 min_px, max_px, config["min_circularity"], config["max_circularity"]
@@ -1410,7 +1437,23 @@ class AnalysisEngine(object):
             ok = analyzer.analyze(work_imp)
             if not ok:
                 raise RuntimeError("Particle analysis failed for C" + str(config["channel"]) + ".")
-            rois = [clone_roi(roi) for roi in temp_manager.getRoisAsArray()]
+            if use_overlay:
+                rois = []
+                particle_overlay = work_imp.getOverlay()
+                if particle_overlay is not None:
+                    for roi in particle_overlay.toArray():
+                        roi = clone_roi(roi)
+                        # The overlay colors its outlines; a ROI Manager does not.
+                        roi.setStrokeColor(None)
+                        roi.setFillColor(None)
+                        rois.append(roi)
+                if len(rois) != result_table.size():
+                    raise RuntimeError(
+                        "Particle analysis returned " + str(len(rois)) + " outline(s) for " +
+                        str(result_table.size()) + " measured object(s) for C" + str(config["channel"]) + "."
+                    )
+            else:
+                rois = [clone_roi(roi) for roi in temp_manager.getRoisAsArray()]
         finally:
             work_imp.deleteRoi()
             # Never leave a manager registered: ParticleAnalyzer would force
@@ -1422,11 +1465,12 @@ class AnalysisEngine(object):
             # Release the hidden manager with dispose(), never close():
             # RoiManager.close() clears ImageJ's reference to the ROI Manager
             # window, which would disconnect the user's own ROI Manager.
-            try:
-                temp_manager.reset()
-                temp_manager.dispose()
-            except ANY_ERROR:
-                pass
+            if temp_manager is not None:
+                try:
+                    temp_manager.reset()
+                    temp_manager.dispose()
+                except ANY_ERROR:
+                    pass
 
         objects = []
         edge_touching = 0

@@ -482,6 +482,87 @@ def test_objects_confined_to_roi(E, t, tmp):
     t.check(RoiManager.getInstance() == manager_before, "the ROI Manager window stays connected after an analysis")
 
 
+def test_blank_channel_gives_zero(E, t, tmp):
+    """A threshold above every pixel value means nothing is positive; it must not fail the image."""
+    imp = make_image("blank.tif")
+    configs = [
+        nuclei_config(E, {"manual_low": 5000, "fill_holes": True, "watershed": True}),
+        marker_config(E, {"manual_low": 5000})
+    ]
+    result = run_image(E, imp, configs, [E.whole_image_roi(imp)], tmp)
+    row = result["summary_rows"][0]
+    t.equal(row["C1_DAPI_Object_Count"], 0, "no objects above an out-of-range threshold")
+    t.close(row["C1_DAPI_Positive_Area"], 0.0, "no nuclear positive area")
+    t.close(row["C2_MAP2_Positive_Area"], 0.0, "no marker positive area")
+    t.close(row["C2_MAP2_Positive_Area_Fraction_Percent"], 0.0, "marker fraction is 0 percent")
+
+    engine = E.AnalysisEngine()
+    prepared = ImagePlus("dim", marker_plane())
+    below = engine.build_masks(prepared, marker_config(E, {"manual_low": 0, "manual_high": 50}), "below")
+    t.equal(E.count_positive_pixels(below["final"].getProcessor().duplicate(), Roi(0, 0, WIDTH, HEIGHT)), 0,
+            "a threshold range below every pixel value gives an empty mask")
+    E.safe_close_image(below["raw"])
+    E.safe_close_image(below["final"])
+
+    inside = engine.build_masks(prepared, marker_config(E, {"manual_low": 800, "manual_high": 5000}), "inside")
+    t.equal(E.count_positive_pixels(inside["final"].getProcessor().duplicate(), Roi(0, 0, WIDTH, HEIGHT)),
+            MARKER_OUTER[2] * MARKER_OUTER[3], "an upper limit above the image maximum is still clamped, as before")
+    E.safe_close_image(inside["raw"])
+    E.safe_close_image(inside["final"])
+
+
+def roi_signature(roi):
+    polygon = roi.getPolygon()
+    bounds = roi.getBounds()
+    return (
+        roi.getType(), bounds.x, bounds.y, bounds.width, bounds.height,
+        list(polygon.xpoints)[:polygon.npoints], list(polygon.ypoints)[:polygon.npoints]
+    )
+
+
+def test_overlay_route_matches_roi_manager(E, t, tmp):
+    """Without a display, outlines come from an overlay; they must equal the ROI Manager's."""
+    if E.is_headless():
+        raise SkipTest("needs a display to build the ROI Manager for comparison")
+    field = mask_with_disks([(20 + 23 * (i % 8), 18 + 27 * (i // 8)) for i in range(48)])
+    donut = field.getProcessor()
+    donut.setValue(255.0)
+    donut.fill(OvalRoi(130, 150, 41, 41))
+    donut.setValue(0.0)
+    donut.fill(OvalRoi(143, 163, 15, 15))
+    donut.resetRoi()
+    ring = ShapeRoi(OvalRoi(15, 10, 170, 175)).xor(ShapeRoi(OvalRoi(70, 60, 60, 70)))
+    variants = [
+        {}, {"include_holes": True}, {"composite_rois": True}, {"four_connected": True},
+        {"exclude_edges": True}, {"min_size": 20, "max_size": 2000, "min_circularity": 0.5}
+    ]
+    by_manager = E.AnalysisEngine()
+    by_manager.collect_rois_from_overlay = False
+    by_overlay = E.AnalysisEngine()
+    by_overlay.collect_rois_from_overlay = True
+    keys = ["area", "perimeter", "circularity", "feret", "min_feret", "aspect_ratio", "roundness", "solidity", "x", "y", "touches_edge"]
+    for shape_name, shape in [("whole image", Roi(0, 0, 200, 200)), ("triangle", triangle_roi()), ("ring", ring)]:
+        for variant in variants:
+            config = nuclei_config(E, variant)
+            first, first_info = by_manager.analyze_objects(field, shape, config)
+            second, second_info = by_overlay.analyze_objects(field, shape, config)
+            label = shape_name + " " + repr(sorted(variant.keys()))
+            t.equal(second_info, first_info, label + ": same counts")
+            t.equal(len(second), len(first), label + ": same number of objects")
+            same = len(second) == len(first)
+            if same:
+                for index in range(len(first)):
+                    if roi_signature(second[index]["roi"]) != roi_signature(first[index]["roi"]):
+                        same = False
+                    for key in keys:
+                        a = first[index][key]
+                        b = second[index][key]
+                        if a != b and not (a != a and b != b):
+                            same = False
+            t.check(same, label + ": same outlines and measurements, object by object")
+            t.check(len(first) > 0, label + ": the comparison is not empty")
+
+
 def test_morphology_is_explicit(E, t, tmp):
     def shapes():
         ip = ByteProcessor(120, 80)
@@ -859,6 +940,8 @@ TESTS = [
     ("full run on a known image", test_full_run),
     ("table columns stay compatible with 2.2", test_column_order_compatible),
     ("objects are confined to the parent ROI outline", test_objects_confined_to_roi),
+    ("a blank channel gives zero, not an error", test_blank_channel_gives_zero),
+    ("overlay outlines match the ROI Manager", test_overlay_route_matches_roi_manager),
     ("binary morphology is explicit", test_morphology_is_explicit),
     ("fill holes and watershed", test_fill_holes_and_watershed),
     ("automatic threshold ignores the display range", test_auto_threshold_ignores_display_range),
