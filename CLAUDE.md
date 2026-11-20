@@ -22,7 +22,7 @@ Version 2.3.0 has been run and tested in the owner's real Fiji: Jython 2.7.4, Im
 
 **Automated tests:**
 
-- `tests/run_tests.py`: 125 tests, about 4300 checks, all pass.
+- `tests/run_tests.py`: 126 tests, about 4300 checks, all pass.
 - `tests/gui_smoke.py`: 30 window steps, all pass.
 - Both also pass on macOS (Apple silicon, the same Fiji versions; 4302 checks there), run on 2026-11-19. No real image was used on macOS.
 - `tools/test_cellquant_figures.py`: 6 tests, all pass.
@@ -89,6 +89,7 @@ All version constants and every module's registered version must match. The laun
 - **`IJ.run` does not raise when a plugin fails.** Verify the effect.
 - **The appearance is a global Swing look.** `look_install()` switches Fiji to FlatLaf dark with the window's palette (`LOOK_EXTRAS`) and fonts (`fonts/`, loaded by `look_fonts_load`) when the window opens, and `look_restore()` hands back the previous look object when it closes (`LookWindowListener`) or when Fiji default is chosen. Keep the look object itself: under Jython `obj.getClass().getName()` raises. A variable font loads at its thinnest weight in Java, so only fixed-weight font files are bundled (IBM Plex Sans from the IBM/plex repository, Chakra Petch from google/fonts). Styling uses FlatLaf client properties and UI defaults only, so other looks ignore it. Custom-painted text goes through `paint_fitted()` and fonts through `look_font()`: nothing may overlap. Tests press buttons by their text: keep button texts unique and unchanged.
 - **One layout pass shapes every tab.** `tidy_tab()` runs once after `build_ui`: one right-aligned label column per tab (long labels wrap), buttons behind fields of one width, button rows of one size, forms in scroll areas pinned to the top. Tabs other than Session and Results sit in a centered column (`in_column`). Build new rows with `add_form_row` / `add_grid_row` and plain `FlowLayout` button rows and they are shaped the same way; do not size widgets by hand.
+- **CLAHE runs in strips on worker threads** (`clahe_in_strips`), overlapping by the block radius, and must stay pixel-identical to the one-piece call (test "CLAHE in strips on several cores is pixel-identical"). An image without a display range, a stack, or a float or RGB plane goes through the one-piece path.
 - **The Results tab only displays.** `results_from_summary()` reads the summary rows of the finished run; it must never measure or write anything, and a failure in `show_results()` must not fail the analysis.
 - **Window threading:**
   - Status messages before the window is displayable are appended directly; afterwards through `run_on_ui`.

@@ -2,7 +2,7 @@
 
 ## 2.3.0 (2026-11-19)
 
-Nothing was removed. Profiles saved by 2.2.x load unchanged, and every table keeps its 2.2 columns in the same order; new columns are added after them. This release was run and tested in a real Fiji (Jython 2.7.4, ImageJ 1.54p, Java 21): 125 automated engine and module tests, a 30-step automated window test, and comparisons with a 2.2 run on the author's Zeiss CZI images.
+Nothing was removed. Profiles saved by 2.2.x load unchanged, and every table keeps its 2.2 columns in the same order; new columns are added after them. This release was run and tested in a real Fiji (Jython 2.7.4, ImageJ 1.54p, Java 21): 126 automated engine and module tests, a 30-step automated window test, and comparisons with a 2.2 run on the author's Zeiss CZI images.
 
 ### Results that change compared with 2.2.x
 
@@ -100,6 +100,8 @@ Read this section before comparing new numbers with old ones.
 
 ### Changed
 
+- **CLAHE runs on several processor cores.** It was by far the slowest step on a large image. The image is cut into horizontal strips that overlap by the block radius; the result is pixel-identical to CLAHE on the whole image, which a test checks. On a 4084 x 4084 plane on an 18-core Mac it took about 2 seconds instead of 17, and a whole run with the default preset about 8 seconds instead of 22.
+- **The picture of the Results tab is drawn on the worker thread**, so the window no longer freezes for a few seconds after a large analysis.
 - The application is a launcher, an engine, a window, six optional modules and a headless batch script. Each file stays within what Fiji's Jython can compile.
 - The automatic threshold is computed from the full data range explicitly.
 - ROI sets are read and written directly instead of through a hidden ROI Manager, so a damaged file raises an error message instead of opening a dialog.
