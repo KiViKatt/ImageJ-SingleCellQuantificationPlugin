@@ -591,7 +591,7 @@ RING_COLORS = [
     Color(94, 242, 224), Color(155, 140, 255), Color(255, 122, 107),
     Color(255, 214, 110), Color(120, 180, 255), Color(232, 140, 255)
 ]
-RING_LIMIT = 6
+RING_LIMIT = 8
 RESULTS_TAB_TITLE = "Results"
 RESULTS_PICTURE_SIZE = 900
 CARD_ARC = 16.0
@@ -796,19 +796,45 @@ def result_number(row, key):
     return number
 
 
+# The superscript two of "per mm2", built without a non-ASCII character in the source.
+SQUARED = b"\xc2\xb2".decode("utf-8")
+METRIC_ORDER = {"count": 0, "density": 1, "percent": 2}
+
+
+def format_metric(value, unit):
+    """A value of the Results tab as text: a count, a density per square
+    millimeter, or a percentage."""
+    if value is None:
+        return "-"
+    if unit == "percent":
+        return "%.1f%%" % value
+    if unit == "density":
+        return format_count(value) + " /mm" + SQUARED
+    return format_count(value)
+
+
 def results_from_summary(headers, rows, configs):
     """What the Results tab shows, worked out from the ROI summary table.
 
-    Returns {"tiles": [...], "bars": {...} or None, "regions": n}. A tile is
-    {"title", "value", "kind" ("count" or "percent"), "note", "color"}.
-    Counts are added up over the regions; a positive-area fraction is the
-    positive area of all regions divided by their area."""
+    Returns a dictionary:
+      "tiles"    the headline figures: {"title", "value", "kind" ("count" or
+                 "percent"), "note", "color"}. Counts are added up over the
+                 regions; a positive-area fraction is the positive area of
+                 all regions divided by their area.
+      "metrics"  what the rings can show, one value per region each:
+                 {"name", "short", "unit" ("count", "density" or "percent"),
+                 "color", "values"}; object counts first, then object
+                 densities per square millimeter, then positive-area shares.
+      "labels"   the name of every region (summary row).
+      "areas"    the area of every region as text, with its unit.
+      "bars"     the first metric in the older shape {"labels", "series",
+                 "unit"}, or None.
+      "regions"  the number of summary rows."""
     by_channel = {}
     for config in configs or []:
         by_channel[config["channel"]] = config
     tiles = []
-    bar_series = []
-    percent_series = []
+    metrics = []
     position = 0
     for header in headers:
         kind = None
@@ -840,11 +866,32 @@ def results_from_summary(headers, rows, configs):
         if len(present) == 0:
             continue
         if kind == "count":
+            note = "counted in " + str(len(present)) + (" region" if len(present) == 1 else " regions")
+            densities = [result_number(row, prefix + "_Object_Density_Per_mm2") for row in rows]
+            # The area of each region in square millimeters follows from its
+            # count and its density; the overall density is all objects over
+            # all of that area.
+            area_mm2 = 0.0
+            complete = len(rows) > 0
+            for index in range(len(rows)):
+                if per_region[index] is None or densities[index] is None:
+                    complete = False
+                elif per_region[index] > 0 and densities[index] > 0:
+                    area_mm2 += per_region[index] / densities[index]
+                elif per_region[index] > 0:
+                    complete = False
+            extra = ""
+            if complete and area_mm2 > 0:
+                extra = format_metric(sum(present) / area_mm2, "density") + " overall"
             tiles.append({
                 "title": name + " objects", "value": sum(present), "kind": "count", "color": color,
-                "note": "counted in " + str(len(present)) + (" region" if len(present) == 1 else " regions")
+                "note": note, "extra": extra
             })
-            bar_series.append({"name": name, "color": color, "values": per_region})
+            metrics.append({"name": name + " objects", "short": name, "unit": "count", "color": color, "values": per_region})
+            if len([number for number in densities if number is not None]) > 0:
+                metrics.append({
+                    "name": name + " density", "short": name, "unit": "density", "color": color, "values": densities
+                })
         else:
             positive = 0.0
             area = 0.0
@@ -859,24 +906,28 @@ def results_from_summary(headers, rows, configs):
                 "title": name + " positive area", "value": value, "kind": "percent", "color": color,
                 "note": "of the measured area"
             })
-            percent_series.append({"name": name, "color": color, "values": per_region})
+            metrics.append({"name": name + " positive area", "short": name, "unit": "percent", "color": color, "values": per_region})
     # Counts first: they are what a viewer looks for.
     tiles = [tile for tile in tiles if tile["kind"] == "count"] + [tile for tile in tiles if tile["kind"] != "count"]
+    metrics = sorted(metrics, key=lambda metric: METRIC_ORDER[metric["unit"]])
+    labels = []
+    areas = []
+    several_frames = len(set([to_text(other.get("Frame", "")) for other in rows])) > 1
+    for row in rows:
+        label = to_text(row.get("Parent_ROI_Name", ""))
+        if several_frames:
+            label = label + " (frame " + to_text(row.get("Frame", "")) + ")"
+        labels.append(label)
+        size = result_number(row, "ROI_Area")
+        areas.append("" if size is None else format_count(size) + " " + to_text(row.get("ROI_Area_Unit", "")))
     bars = None
-    unit = "count"
-    if len(bar_series) == 0 and len(percent_series) > 0:
-        # No channel counts objects: the rings show the positive share.
-        bar_series = percent_series
-        unit = "percent"
-    if len(bar_series) > 0 and len(rows) > 0:
-        labels = []
-        for row in rows:
-            label = to_text(row.get("Parent_ROI_Name", ""))
-            if len(set([to_text(other.get("Frame", "")) for other in rows])) > 1:
-                label = label + " (frame " + to_text(row.get("Frame", "")) + ")"
-            labels.append(label)
-        bars = {"labels": labels, "series": bar_series, "unit": unit}
-    return {"tiles": tiles, "bars": bars, "regions": len(rows)}
+    if len(metrics) > 0 and len(rows) > 0:
+        first = metrics[0]
+        bars = {
+            "labels": labels, "unit": first["unit"],
+            "series": [{"name": first["short"], "color": first["color"], "values": first["values"]}]
+        }
+    return {"tiles": tiles, "bars": bars, "regions": len(rows), "metrics": metrics, "labels": labels, "areas": areas}
 
 
 def results_pictures(run_dir, configs=None):
@@ -1165,8 +1216,10 @@ class ResultsCanvas(JPanel):
     """The organoid map: the picture of the run in a round window, one ring
     per parent ROI around it (its arc is that region's share of the largest
     value), the headline figures on the left and the regions on the right.
+
     Pointing at a ring or at a region lights it up, with its outline on the
-    picture."""
+    picture. The row of names above the map chooses what the rings show.
+    A click on the picture shows all of it, uncropped; a click closes it."""
 
     def __init__(self):
         JPanel.__init__(self)
@@ -1174,36 +1227,67 @@ class ResultsCanvas(JPanel):
         self.pictures = []
         self.progress = 1.0
         self.hover = None
+        self.metric = 0
+        self.zoom = False
         self.setOpaque(True)
         watcher = RingWatcher(self)
         self.addMouseMotionListener(watcher)
         self.addMouseListener(watcher)
 
-    # ----- geometry, shared by painting and pointing -----
+    # ----- what is shown -----
+
+    def metrics(self):
+        if self.data is None:
+            return []
+        return self.data.get("metrics", [])
+
+    def current_metric(self):
+        found = self.metrics()
+        if len(found) == 0:
+            return None
+        if self.metric >= len(found):
+            self.metric = 0
+        return found[self.metric]
 
     def ring_values(self):
         """(labels, values, unit) of the rings, at most RING_LIMIT of them."""
-        if self.data is None or self.data.get("bars") is None:
+        chosen = self.current_metric()
+        if chosen is None:
             return ([], [], "count")
-        bars = self.data["bars"]
-        values = bars["series"][0]["values"]
-        return (bars["labels"][:RING_LIMIT], values[:RING_LIMIT], bars.get("unit", "count"))
+        return (self.data.get("labels", [])[:RING_LIMIT], chosen["values"][:RING_LIMIT], chosen["unit"])
+
+    # ----- geometry, shared by painting and pointing -----
 
     def geometry(self):
         width = self.getWidth()
         height = self.getHeight()
         labels, values, unit = self.ring_values()
         count = len(labels)
-        side = 250 if width >= 1040 else 200
+        side = 270 if width >= 1100 else 210
         show_right = width >= 820
         map_left = side
         map_right = width - (side if show_right else 0)
+        # The names that choose what the rings show, in one row above the map.
+        pills = []
+        found = self.metrics()
+        pill_space = 0
+        if len(found) > 1:
+            measure = self.getFontMetrics(look_font("ui_semibold", 12))
+            widths = [measure.stringWidth(metric["name"]) + 26 for metric in found]
+            total = sum(widths) + 6 * (len(widths) - 1)
+            if total <= map_right - map_left - 20:
+                start = (map_left + map_right) / 2.0 - total / 2.0
+                for index in range(len(widths)):
+                    pills.append((start, 14.0, float(widths[index]), 28.0))
+                    start += widths[index] + 6
+                pill_space = 46
+        hint_space = 26
         center_x = (map_left + map_right) / 2.0
-        center_y = height / 2.0
-        outer = max(40.0, min(map_right - map_left, height) / 2.0 - 30.0)
+        center_y = pill_space + (height - pill_space - hint_space) / 2.0
+        outer = max(40.0, min(map_right - map_left, height - pill_space - hint_space) / 2.0 - 22.0)
         band = 16.0
         gap = 10.0
-        if outer - count * (band + gap) < 70:
+        if outer - count * (band + gap) < 80:
             band = 9.0
             gap = 6.0
         rings = []
@@ -1212,13 +1296,17 @@ class ResultsCanvas(JPanel):
         picture = max(20.0, outer - count * (band + gap) - 6.0)
         rows = []
         if show_right:
-            row_top = max(70.0, center_y - (count * 46) / 2.0)
+            row_high = 60
+            row_top = max(64.0, height / 2.0 - (count * row_high) / 2.0)
             for index in range(count):
-                rows.append((map_right + 6, row_top + index * 46, side - 30, 46))
+                if row_top + (index + 1) * row_high > height - 30:
+                    break
+                rows.append((map_right + 6, row_top + index * row_high, side - 30, row_high))
         return {
             "width": width, "height": height, "side": side, "show_right": show_right,
             "map_left": map_left, "map_right": map_right, "x": center_x, "y": center_y,
-            "rings": rings, "band": band, "picture": picture, "rows": rows
+            "rings": rings, "band": band, "picture": picture, "rows": rows, "pills": pills,
+            "outer": outer
         }
 
     def ring_at(self, x, y):
@@ -1235,13 +1323,50 @@ class ResultsCanvas(JPanel):
                 return index
         return None
 
+    def pill_at(self, x, y):
+        shape = self.geometry()
+        for index in range(len(shape["pills"])):
+            left, top, wide, high = shape["pills"][index]
+            if left <= x <= left + wide and top <= y <= top + high:
+                return index
+        return None
+
+    def on_picture(self, x, y):
+        shape = self.geometry()
+        return len(self.pictures) > 0 and math.sqrt((x - shape["x"]) ** 2 + (y - shape["y"]) ** 2) <= shape["picture"]
+
     def point_at(self, x, y):
-        found = self.ring_at(x, y)
+        found = None if self.zoom else self.ring_at(x, y)
+        clickable = self.zoom or self.pill_at(x, y) is not None or self.on_picture(x, y)
+        try:
+            self.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR if clickable else Cursor.DEFAULT_CURSOR))
+        except ANY_ERROR:
+            pass
         if found != self.hover:
             self.hover = found
             self.repaint()
 
+    def click_at(self, x, y):
+        if self.zoom:
+            self.zoom = False
+        else:
+            pill = self.pill_at(x, y)
+            if pill is not None:
+                self.metric = pill
+            elif self.on_picture(x, y):
+                self.zoom = True
+                self.hover = None
+        self.repaint()
+
     # ----- painting -----
+
+    def colors(self):
+        own = LOOK_STATE["active"]
+        back = LOOK_DEEP if own else look_color("Panel.background", Color(245, 245, 245))
+        text = LOOK_TEXT if own else look_color("Label.foreground", Color.black)
+        faint = LOOK_FAINT if own else look_mix(text, back, 0.45)
+        line = LOOK_LINE if own else look_mix(back, text, 0.18)
+        return (own, back, text, faint, line)
 
     def paintComponent(self, graphics):
         self.super__paintComponent(graphics)
@@ -1249,11 +1374,7 @@ class ResultsCanvas(JPanel):
         shape = self.geometry()
         width = shape["width"]
         height = shape["height"]
-        own = LOOK_STATE["active"]
-        back = LOOK_DEEP if own else look_color("Panel.background", Color(245, 245, 245))
-        text = LOOK_TEXT if own else look_color("Label.foreground", Color.black)
-        faint = LOOK_FAINT if own else look_mix(text, back, 0.45)
-        line = LOOK_LINE if own else look_mix(back, text, 0.18)
+        own, back, text, faint, line = self.colors()
         if own:
             # Deep water: lighter around the map, dark at the edges.
             reach = float(max(width, height)) * 0.75
@@ -1266,8 +1387,18 @@ class ResultsCanvas(JPanel):
             return
         self.paint_figures(graphics, shape, text, faint)
         self.paint_map(graphics, shape, back, text, faint, line)
+        self.paint_pills(graphics, shape, back, text, faint, line)
         if shape["show_right"]:
             self.paint_regions(graphics, shape, text, faint, line)
+        if len(self.pictures) > 0 and not self.zoom:
+            graphics.setFont(look_font("ui", 12))
+            graphics.setColor(faint)
+            hint = "Click the picture to see all of it."
+            room = shape["map_right"] - shape["map_left"] - 20
+            shown_width = min(graphics.getFontMetrics().stringWidth(hint), room)
+            paint_fitted(graphics, hint, shape["x"] - shown_width / 2.0, height - 10, room)
+        if self.zoom:
+            self.paint_zoom(graphics, width, height, text, faint)
 
     def paint_empty(self, graphics, width, height, text, faint):
         graphics.setFont(look_font("figure", 34))
@@ -1284,10 +1415,10 @@ class ResultsCanvas(JPanel):
         """Left: one large figure per measurement."""
         room = shape["side"] - 44
         tiles = self.data["tiles"]
-        step = 112
+        step = 124
         fit = max(1, int((shape["height"] - 40) // step))
         tiles = tiles[:fit]
-        top = max(28.0, shape["y"] - len(tiles) * step / 2.0)
+        top = max(28.0, shape["height"] / 2.0 - len(tiles) * step / 2.0)
         for index in range(len(tiles)):
             tile = tiles[index]
             base = top + index * step
@@ -1297,12 +1428,9 @@ class ResultsCanvas(JPanel):
             graphics.setColor(faint)
             paint_fitted(graphics, tile["title"].upper(), 42, base + 12, room - 16)
             shown = tile["value"] * self.progress
-            if tile["kind"] == "percent":
-                figure = "%.1f%%" % shown
-                final = "%.1f%%" % tile["value"]
-            else:
-                figure = format_count(shown)
-                final = format_count(tile["value"])
+            unit = "percent" if tile["kind"] == "percent" else "count"
+            figure = format_metric(shown, unit)
+            final = format_metric(tile["value"], unit)
             size = 54
             graphics.setFont(look_font("figure", size))
             while size > 24 and graphics.getFontMetrics().stringWidth(final) > room:
@@ -1313,6 +1441,28 @@ class ResultsCanvas(JPanel):
             graphics.setFont(look_font("ui", 12))
             graphics.setColor(faint)
             paint_fitted(graphics, tile["note"], 26, base + 84, room)
+            if tile.get("extra", "") != "":
+                paint_fitted(graphics, tile["extra"], 26, base + 101, room)
+
+    def paint_pills(self, graphics, shape, back, text, faint, line):
+        """Above the map: what the rings show. The chosen one is filled."""
+        found = self.metrics()
+        graphics.setFont(look_font("ui_semibold", 12))
+        metrics = graphics.getFontMetrics()
+        for index in range(len(shape["pills"])):
+            left, top, wide, high = shape["pills"][index]
+            outline = RoundRectangle2D.Float(left, top, wide, high, high, high)
+            if index == self.metric:
+                graphics.setColor(LOOK_ACCENT)
+                graphics.fill(outline)
+                graphics.setColor(LOOK_DEEP)
+            else:
+                graphics.setStroke(BasicStroke(1.0))
+                graphics.setColor(line)
+                graphics.draw(outline)
+                graphics.setColor(faint)
+            name = found[index]["name"]
+            graphics.drawString(name, int(left + (wide - metrics.stringWidth(name)) / 2.0), int(top + 19))
 
     def paint_map(self, graphics, shape, back, text, faint, line):
         labels, values, unit = self.ring_values()
@@ -1349,6 +1499,36 @@ class ResultsCanvas(JPanel):
             graphics.draw(arc)
         self.paint_picture(graphics, shape, text, faint, line)
 
+    def paint_outlines(self, graphics, parents, left, top, scale, named):
+        """The parent ROIs on a picture drawn at (left, top) with a scale."""
+        for index in range(len(parents)):
+            name, xs, ys = parents[index]
+            if len(xs) < 3:
+                continue
+            color = RING_COLORS[index % len(RING_COLORS)]
+            path = Path2D.Float()
+            path.moveTo(left + xs[0] * scale, top + ys[0] * scale)
+            for corner in range(1, len(xs)):
+                path.lineTo(left + xs[corner] * scale, top + ys[corner] * scale)
+            path.closePath()
+            if named:
+                graphics.setStroke(BasicStroke(2.0))
+                graphics.setColor(color)
+                graphics.draw(path)
+                graphics.setFont(look_font("ui_semibold", 13))
+                paint_fitted(graphics, name, left + min(xs) * scale + 8, top + min(ys) * scale + 20,
+                             (max(xs) - min(xs)) * scale - 16)
+            elif self.hover == index:
+                graphics.setColor(Color(color.getRed(), color.getGreen(), color.getBlue(), 46))
+                graphics.fill(path)
+                graphics.setStroke(BasicStroke(2.5))
+                graphics.setColor(color)
+                graphics.draw(path)
+            elif self.hover is None:
+                graphics.setStroke(BasicStroke(1.0))
+                graphics.setColor(Color(221, 243, 245, 90))
+                graphics.draw(path)
+
     def paint_picture(self, graphics, shape, text, faint, line):
         """The picture of the run in the round window at the center."""
         center_x = shape["x"]
@@ -1370,43 +1550,54 @@ class ResultsCanvas(JPanel):
         old_clip = graphics.getClip()
         graphics.clip(window)
         graphics.drawImage(image, int(left), int(top), int(image.getWidth() * scale), int(image.getHeight() * scale), None)
-        for index in range(len(parents)):
-            name, xs, ys = parents[index]
-            if len(xs) < 3:
-                continue
-            path = Path2D.Float()
-            path.moveTo(left + xs[0] * scale, top + ys[0] * scale)
-            for corner in range(1, len(xs)):
-                path.lineTo(left + xs[corner] * scale, top + ys[corner] * scale)
-            path.closePath()
-            if self.hover == index:
-                color = RING_COLORS[index % len(RING_COLORS)]
-                graphics.setColor(Color(color.getRed(), color.getGreen(), color.getBlue(), 46))
-                graphics.fill(path)
-                graphics.setStroke(BasicStroke(2.5))
-                graphics.setColor(color)
-                graphics.draw(path)
-            elif self.hover is None:
-                graphics.setStroke(BasicStroke(1.0))
-                graphics.setColor(Color(221, 243, 245, 90))
-                graphics.draw(path)
+        self.paint_outlines(graphics, parents, left, top, scale, False)
         graphics.setClip(old_clip)
         graphics.setStroke(BasicStroke(2.0))
         graphics.setColor(line)
         graphics.draw(window)
 
+    def paint_zoom(self, graphics, width, height, text, faint):
+        """All of the picture, uncropped, over the map; a click closes it."""
+        picture = self.pictures[0]
+        image = picture[1]
+        parents = picture[2] if len(picture) > 2 else []
+        graphics.setColor(LOOK_DEEP)
+        graphics.fillRect(0, 0, width, height)
+        room_width = width - 56
+        room_height = height - 76
+        if room_width < 40 or room_height < 40:
+            return
+        scale = min(room_width / float(image.getWidth()), room_height / float(image.getHeight()))
+        shown_width = int(image.getWidth() * scale)
+        shown_height = int(image.getHeight() * scale)
+        left = (width - shown_width) // 2
+        top = 22 + (room_height - shown_height) // 2
+        old_clip = graphics.getClip()
+        graphics.clip(RoundRectangle2D.Float(left, top, shown_width, shown_height, CARD_ARC, CARD_ARC))
+        graphics.drawImage(image, left, top, shown_width, shown_height, None)
+        self.paint_outlines(graphics, parents, left, top, scale, True)
+        graphics.setClip(old_clip)
+        graphics.setFont(look_font("ui", 12))
+        graphics.setColor(faint)
+        caption = to_text(picture[0]) + ".  Click anywhere to go back to the map."
+        shown = min(graphics.getFontMetrics().stringWidth(caption), width - 40)
+        paint_fitted(graphics, caption, (width - shown) // 2, height - 20, width - 40)
+
     def paint_regions(self, graphics, shape, text, faint, line):
-        """Right: the regions, one row per ring."""
+        """Right: the regions, one row per ring. The large figure is what
+        the rings show; the line under the name holds the other values."""
         labels, values, unit = self.ring_values()
         rows = shape["rows"]
         if len(rows) == 0:
             return
+        found = self.metrics()
+        chosen = self.current_metric()
+        areas = self.data.get("areas", [])
         left = rows[0][0]
         wide = rows[0][2]
         graphics.setFont(look_font("ui_semibold", 11))
         graphics.setColor(faint)
-        heading = "OBJECTS BY REGION" if unit == "count" else "POSITIVE AREA BY REGION"
-        paint_fitted(graphics, heading, left + 8, rows[0][1] - 16, wide - 8)
+        paint_fitted(graphics, (chosen["name"] + " by region").upper(), left + 8, rows[0][1] - 16, wide - 8)
         for index in range(len(rows)):
             row_left, row_top, row_wide, row_high = rows[index]
             color = RING_COLORS[index % len(RING_COLORS)]
@@ -1417,28 +1608,48 @@ class ResultsCanvas(JPanel):
             graphics.setStroke(BasicStroke(1.0))
             graphics.drawLine(int(row_left + 8), int(row_top + row_high), int(row_left + row_wide - 8), int(row_top + row_high))
             number = values[index]
-            if number is None:
-                figure = "-"
-            elif unit == "percent":
-                figure = "%.1f%%" % (number * self.progress)
-            else:
-                figure = format_count(number * self.progress)
-            graphics.setFont(look_font("figure", 26))
-            figure_wide = graphics.getFontMetrics().stringWidth(
-                figure if number is None else ("%.1f%%" % number if unit == "percent" else format_count(number))
-            )
+            figure = format_metric(None if number is None else number * self.progress, unit)
+            size = 26
+            graphics.setFont(look_font("figure", size))
+            while size > 16 and graphics.getFontMetrics().stringWidth(format_metric(number, unit)) > row_wide * 0.5:
+                size -= 2
+                graphics.setFont(look_font("figure", size))
+            figure_wide = graphics.getFontMetrics().stringWidth(format_metric(number, unit))
             graphics.setColor(text)
-            graphics.drawString(figure, int(row_left + row_wide - 10 - figure_wide), int(row_top + 31))
+            graphics.drawString(figure, int(row_left + row_wide - 10 - figure_wide), int(row_top + 28))
             graphics.setColor(color)
-            graphics.fillOval(int(row_left + 10), int(row_top + 19), 9, 9)
+            graphics.fillOval(int(row_left + 10), int(row_top + 15), 9, 9)
             graphics.setFont(look_font("ui", 13))
             graphics.setColor(text if self.hover in (None, index) else faint)
-            paint_fitted(graphics, labels[index], row_left + 28, row_top + 28, row_wide - 28 - figure_wide - 22)
-        note_top = rows[-1][1] + rows[-1][3] + 26
+            paint_fitted(graphics, labels[index], row_left + 28, row_top + 25, row_wide - 28 - figure_wide - 22)
+            # The other values of this region, and its area.
+            others = []
+            for metric_index in range(len(found)):
+                if metric_index == self.metric or index >= len(found[metric_index]["values"]):
+                    continue
+                other = found[metric_index]
+                word = other["short"] + (" area" if other["unit"] == "percent" else "")
+                if other["unit"] == "density":
+                    word = ""
+                others.append((word + " " + format_metric(other["values"][index], other["unit"])).strip())
+            if index < len(areas) and areas[index] != "":
+                others.append(areas[index])
+            # As many of them as fit whole; none is cut short.
+            graphics.setFont(look_font("ui", 11))
+            graphics.setColor(faint)
+            measure = graphics.getFontMetrics()
+            line_text = ""
+            for other_text in others:
+                longer = other_text if line_text == "" else line_text + ",  " + other_text
+                if measure.stringWidth(longer) > row_wide - 38:
+                    break
+                line_text = longer
+            graphics.drawString(line_text, int(row_left + 28), int(row_top + 46))
+        note_top = rows[-1][1] + rows[-1][3] + 24
         if note_top < shape["height"] - 14:
             graphics.setFont(look_font("ui", 12))
             graphics.setColor(faint)
-            more = len(self.data["bars"]["labels"]) - len(labels)
+            more = len(self.data.get("labels", [])) - len(rows)
             note = "Point at a ring to see its region." if more <= 0 else str(more) + " more regions are in the tables."
             paint_fitted(graphics, note, left + 8, note_top, wide - 8)
 
@@ -1454,6 +1665,9 @@ class RingWatcher(MouseAdapter):
 
     def mouseExited(self, event):
         self.canvas.point_at(-1000, -1000)
+
+    def mouseClicked(self, event):
+        self.canvas.click_at(event.getX(), event.getY())
 
 
 class ResultsAnimation(ActionListener):
@@ -1825,6 +2039,8 @@ class CellQuantStudioUniversal(JFrame):
         try:
             self.results_canvas.data = results_from_summary(result["summary_headers"], result["summary_rows"], configs)
             self.results_canvas.pictures = results_pictures(run_dir, configs)
+            self.results_canvas.metric = 0
+            self.results_canvas.zoom = False
             regions = self.results_canvas.data["regions"]
             self.results_caption.setText(
                 to_text(source_title) + "   -   " + str(regions) + (" region" if regions == 1 else " regions") +
