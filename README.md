@@ -17,29 +17,39 @@ Built-in tools check the results: object counts against manual point marks, mask
 
 > **Version 2.3.0.** This version has been run and tested in a real Fiji (Jython 2.7.4, ImageJ 1.54p, Java 21) and on the author's Zeiss CZI images. Upgrading from 2.2.x? Read [CHANGELOG.md](CHANGELOG.md) first: some results change on purpose. The earlier macros are kept in [legacy/](legacy/) and are not covered here.
 
-![The Results tab after an analysis: headline numbers, objects per region, the merged color picture and the overlay picture](docs/images/results_tab.jpg)
+![The Results tab after an analysis: totals on the left, one ring per region in the middle, the regions on the right](docs/images/results_tab.jpg)
 
-*The Results tab after an analysis of a synthetic test image.*
+*The Results tab after an analysis of a synthetic test image (not real tissue), in the Light appearance.*
 
-## Look and Results tab
+## The window
 
-- **Results tab: the organoid map.** After "3. Run analysis" the window shows the run as one picture.
-  - **In the middle**, wide rings, one per parent ROI (the first eight), from the outside in. The arc of a ring is that region's value as a share of the largest one. At their center, in a small round window, is the picture of the run: all channels merged in their own colors, every detected object outlined. A click on it shows the whole picture, uncropped, with the parent ROIs named; another click goes back.
-  - **On the left**, the headline figures (counts added up over the parent ROIs with the overall density; positive-area shares as positive area of all ROIs over their area), the list **Rings show** that chooses the value of the rings (object count, object density per mm², or positive-area share, for every channel that has it), and the **Analyse** button, which runs the analysis like "3. Run analysis".
+- **Session tab.** Three cards, and the status line at the foot of the window.
+  - **Source image.** A picture of the image and what the file says about it: name, size in pixels and in micrometers, channels, Z slices, time frames, bit depth and pixel size. Under it, the **Channels** of the image: for each one, its display color and, when the file's metadata gives them, its name and its excitation and emission wavelengths (read with Bio-Formats), beside the name and analysis mode set for that channel in the window. A channel called DAPI or Hoechst whose excitation is not at about 350-420 nm, or a 405 nm channel while another channel is called DAPI, is pointed out in a line under the list. Nothing else is guessed and nothing is changed: correct the names on the **Channels** tab. An image file can also be dropped onto the card.
+  - **Setup.** The image file, the output folder, the analysis preset and the frames.
+  - **Analysis.** The three steps, **1 Prepare channels**, **2 Preview masks** and **3 Analyse**, and **Quick run**, which prepares and analyses in one step.
+  - **Show run log**, at the bottom right, opens the log of every status message; a warning or an error turns the status line red and is counted on that button.
+
+![The Session tab with an image loaded: the source image, its channels with their wavelengths, the setup and the three steps](docs/images/session_tab.jpg)
+
+- **Results tab: the organoid map.** After **3 Analyse** the window shows the run as one picture.
+  - **In the middle**, wide rings, one per parent ROI (the first eight), from the outside in. The arc of a ring is that region's value as a share of the highest one (for a positive-area share: of 100%); the line under the rings says which. At their center, in a small round window, is the picture of the run: all channels merged in their own colors, every detected object outlined. A click on it shows the whole picture, uncropped, with the parent ROIs named and a scale bar; **Back to the map** returns.
+  - **On the left**, the headline figures (counts added up over the parent ROIs; positive-area shares as positive area of all ROIs over their area), the list **Rings show** that chooses the value of the rings (object count, object density per mm², or positive-area share, for every channel that has it; when there are many, the rest are under **More choices**), and the **Analyse** button, which runs the analysis like **3 Analyse**.
   - **On the right**, the regions: the chosen value in large figures, the other values and the ROI area under the name; below them, what can be pointed at and clicked.
+  - **At the top**, the image name, the number of regions, the time of the run and its folder, and **Show result files**.
   - Pointing at a ring or at a region lights it up and outlines that region on the picture.
   - Nothing new is measured or written: every number comes from `roi_summary.csv`, which remains the record.
+  - The headline count adds up the parent ROIs. When parent ROIs share a border (for example depth zones that touch), an object lying on the border is clipped there and counted in both.
 
-![One ring metric chosen and one region pointed at](docs/images/results_hover.jpg)
+![One region pointed at: its ring, its row and its outline on the picture](docs/images/results_hover.jpg)
 
-![The whole picture after a click](docs/images/results_picture.jpg)
-- **Appearance.** The window has two looks of its own, chosen under **Appearance** at the top right: **Dark**, deep-water blues with one glowing accent, and **Light**, white and soft grey with one blue accent. Both use IBM Plex Sans for the interface and Chakra Petch, an angular technical face, for the title and the figures. The fonts are in the `fonts` folder under the SIL Open Font License; without them the window uses the system fonts. The looks are built on FlatLaf's dark and light themes, which ship with Fiji. A Swing theme applies to every Fiji window, so Fiji changes with it while Cell Quant Studio is open and gets its previous look back when the window closes. **Appearance > Fiji default** leaves Fiji as it is; the choice is remembered.
+![The whole picture after a click, with the regions named and every counted object outlined](docs/images/results_picture.jpg)
 
-- **Session tab.** A drop zone for the image file with the workflow steps, and a small picture of the source image beside its description.
+- **Appearance.** **Light | Dark | Fiji** at the top right. Light and Dark are the window's own looks: neutral grays, content on rounded cards, one blue accent for the next step, and the interface font of the system (Segoe UI on Windows, San Francisco on macOS; IBM Plex Sans from the `fonts` folder where the system has neither). Both are built on FlatLaf, which ships with Fiji. A Swing theme applies to every Fiji window, so Fiji changes with it while Cell Quant Studio is open and gets its previous look back when the window closes. **Fiji** leaves Fiji's own look alone. The choice is remembered; a new installation starts in Light.
 
-![The Session tab in the Dark appearance](docs/images/session_tab.jpg)
+![The Results tab in the Dark appearance](docs/images/results_tab_dark.jpg)
 
-![The Results tab in the Light appearance](docs/images/results_tab_light.jpg)
+- **One-click demo.** `demo/Cell_Quant_Studio_Demo.py` opens the window, loads a demo image and a settings profile, outlines the tissue, adds three depth zones and analyses, in about a minute. [demo/README.md](demo/README.md) has the set-up and a run sheet for a 3-minute presentation.
+- **Landing page.** [site/](site/) holds a one-page introduction for people outside the field, with the same demo as a click-through of pictures recorded from the window.
 
 ## Capabilities
 
@@ -94,10 +104,12 @@ An object is a segmented image component; its biological identity must be establ
 | `cellquantcorrect.py` | Optional: error-corrected counts from validation data. |
 | `cellquantrobust.py` | Optional: group-level robustness across a grid of settings. |
 | `cellquant_batch_headless.py` | Folder batch from a saved profile, without the window. |
-| `tests/` | Automated tests: `run_tests.py` (engine and modules, loads every `test_*.py`), `gui_smoke.py` (the window), `run_tests.sh` and `cli_runner.py` (run them from a terminal). |
-| `fonts/` | IBM Plex Sans and Chakra Petch with their licence texts (SIL Open Font License 1.1). Optional: copy the folder beside the application files to get the window's own look. |
+| `tests/` | Automated tests: `run_tests.py` (engine and modules, loads every `test_*.py`), `gui_smoke.py` (the window), `run_tests.sh` and `cli_runner.py` (run them from a terminal). `ui_snapshots.py` saves a picture of every tab in each look. |
+| `fonts/` | IBM Plex Sans and Chakra Petch with their licence texts (SIL Open Font License 1.1). Optional: IBM Plex Sans is used where the system has no interface font of its own; Chakra Petch is a display face for the title and the figures, off unless `LOOK_USE_DISPLAY_FONT` in `cellquantcore.py` is switched on. |
 | `tools/` | `cellquant_figures.py`: SVG figures from result tables, with its own tests. |
-| `examples/` | An example four-channel settings profile. |
+| `examples/` | Settings profiles: a four-channel example (SOX2, Caspase-3, MAP2, DAPI) and the profile of the one-click demo (HOPX, PAX6, DAPI, TBR2). Their thresholds are placeholders, not validated values. |
+| `demo/` | The one-click demo of the whole workflow and its run sheet. |
+| `site/` | The landing page: one static page, its pictures, and the scripts that recorded them. |
 | `docs/VALIDATION.md` | How to validate a profile with the built-in tools. |
 | `docs/VALIDATION_STUDY.md` | The validation study planned for publication. |
 | `paper/` | Manuscript draft and verified references. |
@@ -108,7 +120,7 @@ The launcher, engine, window and every optional module check that they come from
 
 ## Installation and launch
 
-1. Copy the application files (the launcher, the engine, the window file and the six `cellquant*.py` module files) into `Fiji.app/plugins/Scripts/Cell Quant Studio/`. If an older version is installed there, replace all of its files. Copy the `fonts` folder there too (optional; it gives the window its own typefaces).
+1. Copy the application files (the launcher, the engine, the window file and the six `cellquant*.py` module files) into `Fiji.app/plugins/Scripts/Cell Quant Studio/`. If an older version is installed there, replace all of its files. Copy the `fonts` folder there too (optional).
 2. Open `Cell_Quant_Studio_final.py` in Fiji's Script Editor.
 3. Select **Language > Python (Jython)** if needed and click **Run**.
 
@@ -122,8 +134,8 @@ The Script Editor console lists the optional modules that were loaded. The optio
 4. Choose projection and preprocessing for each enabled channel.
 5. Configure thresholding and object separation.
 6. On **ROIs and output**, choose the regions: whole image, the current selection, or parent ROIs from ROI Manager. **Detect tissue outline** on the Analyses tab can draw the organoid outline for you.
-7. Click **1. Prepare enabled channels**, then **2. Preview all masks**, and inspect the segmentation.
-8. Choose an output folder close to the drive root (for example `C:\CQ`), then click **3. Run analysis**. The analysis runs in the background; the window stays usable, and a progress bar with **Cancel** appears at the bottom.
+7. Click **1 Prepare channels**, then **2 Preview masks**, and inspect the segmentation.
+8. Choose an output folder close to the drive root (for example `C:\CQ`), then click **3 Analyse**. The analysis runs in the background; the window stays usable, and a progress bar with **Cancel** appears at the bottom.
 9. Review the tables, masks and settings together. Save the profile once it works on representative images.
 
 A saved profile records a procedure. It does not prove the segmentation is right for every image; use the validation tools for that.
@@ -454,8 +466,9 @@ The automated tests build synthetic images with known answers and check the resu
   bash tests/run_tests.sh /path/to/Fiji.app "$PWD/tests/gui_smoke.py"
   ```
 
-  The first runs the engine and module tests (126 tests, about 4300 checks, about 1 minute). The second runs the window test (30 steps); it opens windows for about half a minute.
+  The first runs the engine and module tests (126 tests, about 4300 checks, about 1 minute). The second runs the window test (32 steps); it opens windows for about three quarters of a minute.
 - **Selected tests only:** set `CELLQUANT_TEST_FILTER=word`.
+- **Pictures of every tab:** `bash tests/run_tests.sh /path/to/Fiji.app "$PWD/tests/ui_snapshots.py"` saves a PNG of each tab in each look, for reviewing the interface without clicking through it. Its options are listed at the top of the file.
 - **Large images:** set `CELLQUANT_JAVA_OPTS=-Xmx16g`.
 
 ## Scope and limitations
