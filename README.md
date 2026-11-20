@@ -23,8 +23,8 @@ Built-in tools check the results: object counts against manual point marks, mask
 
 ## Look and Results tab
 
-- **Results tab.** After "3. Run analysis" the window shows the run as a picture: one large number per measurement (objects counted, share of the area that is marker-positive), a chart of the object counts per parent ROI, a picture of all channels merged in their own colors with the parent ROIs and every detected object outlined, and the object overlay image. Counts are added up over the parent ROIs; a positive-area share is the positive area of all ROIs divided by their area. Nothing new is measured or written: the numbers come from `roi_summary.csv`, which remains the record.
-- **Appearance.** The window follows the macOS design language: neutral surfaces, one blue accent, the system font, and text that is shortened rather than overlapping when the window is small. It uses FlatLaf's macOS theme, which ships with Fiji. A Swing theme applies to every Fiji window, so Fiji changes with it while Cell Quant Studio is open and gets its previous look back when the window closes. **Appearance** at the top right offers Dark (the default), Light, and Fiji default, which leaves Fiji as it is; the choice is remembered.
+- **Results tab: the organoid map.** After "3. Run analysis" the window shows the run as one picture. In the middle, in a round window, are all channels merged in their own colors with every detected object outlined. Around it is one ring per parent ROI (the first six); the arc of a ring is that region's object count as a share of the largest one (or its positive-area share when no channel counts objects). Pointing at a ring, or at a region in the list on the right, lights it up and outlines that region on the picture. The headline figures are on the left: counts are added up over the parent ROIs; a positive-area share is the positive area of all ROIs divided by their area. Nothing new is measured or written: the numbers come from `roi_summary.csv`, which remains the record.
+- **Appearance.** The window has its own look: deep-water blues with one glowing accent, Manrope for the interface and Instrument Serif italic for the figures. Both fonts are in the `fonts` folder under the SIL Open Font License; without them the window uses the system fonts. The look is built on FlatLaf's dark theme, which ships with Fiji. A Swing theme applies to every Fiji window, so Fiji changes with it while Cell Quant Studio is open and gets its previous look back when the window closes. **Appearance > Fiji default** at the top right leaves Fiji as it is; the choice is remembered.
 
 - **Session tab.** A drop zone for the image file with the workflow steps, and a small picture of the source image beside its description.
 
@@ -84,6 +84,7 @@ An object is a segmented image component; its biological identity must be establ
 | `cellquantrobust.py` | Optional: group-level robustness across a grid of settings. |
 | `cellquant_batch_headless.py` | Folder batch from a saved profile, without the window. |
 | `tests/` | Automated tests: `run_tests.py` (engine and modules, loads every `test_*.py`), `gui_smoke.py` (the window), `run_tests.sh` and `cli_runner.py` (run them from a terminal). |
+| `fonts/` | Manrope and Instrument Serif with their licence texts (SIL Open Font License 1.1). Optional: copy the folder beside the application files to get the window's own look. |
 | `tools/` | `cellquant_figures.py`: SVG figures from result tables, with its own tests. |
 | `examples/` | An example four-channel settings profile. |
 | `docs/VALIDATION.md` | How to validate a profile with the built-in tools. |
@@ -96,7 +97,7 @@ The launcher, engine, window and every optional module check that they come from
 
 ## Installation and launch
 
-1. Copy the application files (the launcher, the engine, the window file and the six `cellquant*.py` module files) into `Fiji.app/plugins/Scripts/Cell Quant Studio/`. If an older version is installed there, replace all of its files.
+1. Copy the application files (the launcher, the engine, the window file and the six `cellquant*.py` module files) into `Fiji.app/plugins/Scripts/Cell Quant Studio/`. If an older version is installed there, replace all of its files. Copy the `fonts` folder there too (optional; it gives the window its own typefaces).
 2. Open `Cell_Quant_Studio_final.py` in Fiji's Script Editor.
 3. Select **Language > Python (Jython)** if needed and click **Run**.
 

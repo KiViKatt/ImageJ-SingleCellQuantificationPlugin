@@ -38,7 +38,9 @@ from javax.swing import Timer as SwingTimer
 from javax.swing import JViewport, SwingConstants
 from javax.swing.plaf.basic import BasicHTML
 from javax.swing.text import View
-from java.awt import LayoutManager
+from java.awt import LayoutManager, GraphicsEnvironment, RadialGradientPaint, AlphaComposite
+from java.awt.event import MouseAdapter
+from java.awt.geom import Ellipse2D, Path2D
 from java.awt import (
     BorderLayout, GridBagLayout, GridBagConstraints, Insets, Dimension, Font,
     Color, FlowLayout, Cursor, Window, RenderingHints, GradientPaint, BasicStroke
@@ -520,43 +522,79 @@ class ChannelSettingsPanel(JPanel):
 # Look of the window, and the Results tab
 # -----------------------------------------------------------------------------
 #
-# The look follows the macOS design language: neutral surfaces, one blue
-# accent, the system font, plain rounded shapes. It is FlatLaf's macOS theme
-# (dark or light), which ships with Fiji. A Swing look applies to every
-# window of Fiji, so it is switched on when the window opens and the previous
-# look is put back when the window closes. The choice (top right) is remembered.
+# The look is the window's own: deep-water blues with one glowing accent,
+# Manrope for the interface and Instrument Serif italic for the figures
+# (both under the SIL Open Font License, in the fonts folder). It is built
+# on FlatLaf's dark theme, which ships with Fiji. A Swing look applies to
+# every window of Fiji, so it is switched on when the window opens and the
+# previous look is put back when the window closes. "Fiji default" (top
+# right) leaves Fiji alone; the choice is remembered.
 
 LOOK_DARK = "Dark"
-LOOK_LIGHT = "Light"
 LOOK_FIJI = "Fiji default"
-LOOK_NAMES = [LOOK_DARK, LOOK_LIGHT, LOOK_FIJI]
+LOOK_NAMES = [LOOK_DARK, LOOK_FIJI]
 LOOK_PREF_KEY = "cellquant.look"
 LOOK_STATE = {"active": False, "name": None, "previous": None, "extras": None}
-# The system colors of macOS (dark variants; they also read well on white).
-LOOK_ACCENT = Color(10, 132, 255)
-LOOK_ACCENT_HEX = "#0a84ff"
-LOOK_OUTLINE = Color(255, 214, 10)
-LOOK_EXTRAS = [
-    ("@accentColor", LOOK_ACCENT_HEX),
-    ("ProgressBar.arc", "999"),
-    ("ScrollBar.width", "12"),
-    ("TabbedPane.tabHeight", "34"),
-    ("TabbedPane.showTabSeparators", "false"),
-    ("SplitPane.dividerSize", "10"),
-    ("TitledBorder.titleColor", "#8e8e93"),
-    ("TitledBorder.position", "ABOVE_TOP")
+LOOK_FONTS = {"loaded": False}
+LOOK_FONT_FILES = [
+    ("ui", "Manrope-Regular.ttf"), ("ui_semibold", "Manrope-SemiBold.ttf"), ("ui_bold", "Manrope-Bold.ttf"),
+    ("figure", "InstrumentSerif-Italic.ttf"), ("figure_upright", "InstrumentSerif-Regular.ttf")
 ]
-# The outline of a titled group: one hairline with round corners.
-LOOK_GROUP_BORDER = {LOOK_DARK: "8,10,10,10,#3a3a3c,1,12", LOOK_LIGHT: "8,10,10,10,#d1d1d6,1,12"}
+# The palette.
+LOOK_DEEP = Color(6, 18, 31)
+LOOK_PANEL = Color(11, 34, 51)
+LOOK_LINE = Color(22, 54, 77)
+LOOK_TEXT = Color(221, 243, 245)
+LOOK_FAINT = Color(127, 163, 181)
+LOOK_ACCENT = Color(94, 242, 224)
+LOOK_ACCENT_HEX = "#5ef2e0"
+LOOK_CORAL = Color(255, 122, 107)
+LOOK_VIOLET = Color(155, 140, 255)
+LOOK_EXTRAS = [
+    ("@background", "#081a29"),
+    ("@foreground", "#ddf3f5"),
+    ("@accentColor", LOOK_ACCENT_HEX),
+    ("Label.disabledForeground", "#7fa3b5"),
+    ("Component.borderColor", "#1b4460"),
+    ("Component.arc", "14"),
+    ("TextComponent.arc", "14"),
+    ("Button.arc", "999"),
+    ("Button.background", "#0f2b40"),
+    ("Button.hoverBackground", "#143750"),
+    ("Button.pressedBackground", "#0b2233"),
+    ("Button.borderColor", "#1b4460"),
+    ("TextField.background", "#0b2233"),
+    ("TextArea.background", "#0b2233"),
+    ("ComboBox.background", "#0b2233"),
+    ("ComboBox.buttonBackground", "#0b2233"),
+    ("TabbedPane.underlineColor", LOOK_ACCENT_HEX),
+    ("TabbedPane.tabHeight", "36"),
+    ("TabbedPane.showTabSeparators", "false"),
+    ("ProgressBar.arc", "999"),
+    ("ProgressBar.foreground", LOOK_ACCENT_HEX),
+    ("ProgressBar.background", "#16364d"),
+    ("ScrollBar.width", "12"),
+    ("ScrollBar.thumbArc", "999"),
+    ("ScrollBar.thumbInsets", "2,2,2,2"),
+    ("SplitPane.dividerSize", "10"),
+    ("TitledBorder.titleColor", "#7fa3b5"),
+    ("TitledBorder.position", "ABOVE_TOP"),
+    ("TitledBorder.border", "8,10,10,10,#16364d,1,16")
+]
 CHANNEL_SWATCHES = {
-    "Blue": Color(10, 132, 255), "Green": Color(48, 209, 88), "Red": Color(255, 69, 58),
-    "Magenta": Color(191, 90, 242), "Cyan": Color(100, 210, 255), "Yellow": Color(255, 214, 10)
+    "Blue": Color(120, 180, 255), "Green": Color(94, 242, 160), "Red": Color(255, 122, 107),
+    "Magenta": Color(232, 140, 255), "Cyan": Color(94, 242, 224), "Yellow": Color(255, 214, 110)
 }
-CHANNEL_SERIES = [Color(10, 132, 255), Color(48, 209, 88), Color(255, 159, 10), Color(191, 90, 242)]
+CHANNEL_SERIES = [Color(94, 242, 224), Color(155, 140, 255), Color(255, 122, 107), Color(255, 214, 110)]
+# One color per ring of the organoid map, from the outside in.
+RING_COLORS = [
+    Color(94, 242, 224), Color(155, 140, 255), Color(255, 122, 107),
+    Color(255, 214, 110), Color(120, 180, 255), Color(232, 140, 255)
+]
+RING_LIMIT = 6
 RESULTS_TAB_TITLE = "Results"
-RESULTS_MAX_PICTURES = 2
 RESULTS_PICTURE_SIZE = 900
-CARD_ARC = 14.0
+CARD_ARC = 16.0
 
 
 def look_preference():
@@ -567,24 +605,59 @@ def look_preference():
     return look_value if look_value in LOOK_NAMES else LOOK_DARK
 
 
-def look_class(name):
-    """The FlatLaf look for a name: the macOS theme, or the plain FlatLaf
-    theme in a FlatLaf too old to have it."""
+def look_fonts_load():
+    """Read the fonts in the fonts folder beside this file, once. A font
+    that is missing is simply not used."""
+    if LOOK_FONTS["loaded"]:
+        return
+    LOOK_FONTS["loaded"] = True
+    folders = []
+    if globals().get("package_dir"):
+        folders.append(os.path.join(to_text(globals().get("package_dir")), "fonts"))
     try:
-        from com.formdev.flatlaf.themes import FlatMacDarkLaf, FlatMacLightLaf
-        return FlatMacLightLaf if name == LOOK_LIGHT else FlatMacDarkLaf
+        folders.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "fonts"))
     except ANY_ERROR:
-        from com.formdev.flatlaf import FlatDarkLaf, FlatLightLaf
-        return FlatLightLaf if name == LOOK_LIGHT else FlatDarkLaf
+        pass
+    for folder in folders:
+        if not os.path.isdir(folder):
+            continue
+        for pair in LOOK_FONT_FILES:
+            path = os.path.join(folder, pair[1])
+            if pair[0] in LOOK_FONTS or not os.path.isfile(path):
+                continue
+            try:
+                font = Font.createFont(Font.TRUETYPE_FONT, File(path))
+                GraphicsEnvironment.getLocalGraphicsEnvironment().registerFont(font)
+                LOOK_FONTS[pair[0]] = font
+            except ANY_ERROR:
+                pass
+
+
+def look_font(kind, size):
+    """A font of the look: "ui", "ui_semibold", "ui_bold", "figure" (the
+    serif italic of the large numbers) or "figure_upright". Without the
+    bundled font, the nearest system font."""
+    look_fonts_load()
+    font = LOOK_FONTS.get(kind)
+    if font is not None:
+        return font.deriveFont(float(size))
+    if kind == "figure":
+        return Font("Serif", Font.ITALIC, int(size))
+    if kind == "figure_upright":
+        return Font("Serif", Font.PLAIN, int(size))
+    base = UIManager.getFont("Label.font")
+    if base is None:
+        base = Font("SansSerif", Font.PLAIN, 13)
+    return base.deriveFont(Font.PLAIN if kind == "ui" else Font.BOLD, float(size))
 
 
 def look_install(name=LOOK_DARK):
-    """Switch Fiji to the named look (event thread). True when it is on."""
+    """Switch Fiji to the window's look (event thread). True when it is on."""
     if LOOK_STATE["active"] and LOOK_STATE["name"] == name:
         return True
     try:
-        from com.formdev.flatlaf import FlatLaf
-        wanted = look_class(name)
+        from com.formdev.flatlaf import FlatLaf, FlatDarkLaf
+        look_fonts_load()
         if not LOOK_STATE["active"]:
             # The look object itself is kept, to be handed back by look_restore().
             LOOK_STATE["previous"] = UIManager.getLookAndFeel()
@@ -592,16 +665,17 @@ def look_install(name=LOOK_DARK):
         extras = HashMap()
         for pair in LOOK_EXTRAS:
             extras.put(pair[0], pair[1])
-        extras.put("TitledBorder.border", LOOK_GROUP_BORDER.get(name, LOOK_GROUP_BORDER[LOOK_DARK]))
+        if "ui" in LOOK_FONTS:
+            extras.put("defaultFont", "13 Manrope")
         FlatLaf.setGlobalExtraDefaults(extras)
-        wanted.setup()
+        FlatDarkLaf.setup()
         FlatLaf.updateUI()
         LOOK_STATE["active"] = True
         LOOK_STATE["name"] = name
     except ANY_ERROR as exc:
         # No FlatLaf in this Fiji: the window keeps Fiji's look.
         try:
-            IJ.log(APP_NAME + ": the " + to_text(name).lower() + " look is not available (" + to_text(exc) + ").")
+            IJ.log(APP_NAME + ": the window's own look is not available (" + to_text(exc) + ").")
         except ANY_ERROR:
             pass
         return False
@@ -655,14 +729,14 @@ def look_smooth(graphics):
 
 
 def style_button(button, kind="plain"):
-    """One filled button per section ("primary"), the rest plain, as on
-    macOS. Looks other than FlatLaf ignore this."""
+    """One filled, glowing button per section ("primary"), the rest plain.
+    Looks other than FlatLaf ignore this."""
     try:
         if kind == "primary":
             button.putClientProperty(
                 "FlatLaf.style",
-                "background: #0a84ff; hoverBackground: #2b95ff; pressedBackground: #0071e3; "
-                "foreground: #ffffff; borderWidth: 0; margin: 5,14,5,14"
+                "background: #5ef2e0; hoverBackground: #8af7ea; pressedBackground: #3fd6c4; "
+                "foreground: #06121f; borderWidth: 0; font: bold; margin: 5,14,5,14"
             )
         else:
             button.putClientProperty("FlatLaf.style", "margin: 5,14,5,14")
@@ -734,6 +808,7 @@ def results_from_summary(headers, rows, configs):
         by_channel[config["channel"]] = config
     tiles = []
     bar_series = []
+    percent_series = []
     position = 0
     for header in headers:
         kind = None
@@ -784,9 +859,15 @@ def results_from_summary(headers, rows, configs):
                 "title": name + " positive area", "value": value, "kind": "percent", "color": color,
                 "note": "of the measured area"
             })
+            percent_series.append({"name": name, "color": color, "values": per_region})
     # Counts first: they are what a viewer looks for.
     tiles = [tile for tile in tiles if tile["kind"] == "count"] + [tile for tile in tiles if tile["kind"] != "count"]
     bars = None
+    unit = "count"
+    if len(bar_series) == 0 and len(percent_series) > 0:
+        # No channel counts objects: the rings show the positive share.
+        bar_series = percent_series
+        unit = "percent"
     if len(bar_series) > 0 and len(rows) > 0:
         labels = []
         for row in rows:
@@ -794,49 +875,19 @@ def results_from_summary(headers, rows, configs):
             if len(set([to_text(other.get("Frame", "")) for other in rows])) > 1:
                 label = label + " (frame " + to_text(row.get("Frame", "")) + ")"
             labels.append(label)
-        bars = {"labels": labels, "series": bar_series}
+        bars = {"labels": labels, "series": bar_series, "unit": unit}
     return {"tiles": tiles, "bars": bars, "regions": len(rows)}
 
 
 def results_pictures(run_dir, configs=None):
-    """The pictures of a run for the Results tab, as (caption,
-    java.awt.Image) pairs: all channels merged in color with the detected
-    objects outlined, then the first object overlay. Never raises."""
-    pictures = []
+    """The picture of a run for the Results tab, as a list holding at most
+    one (caption, java.awt.Image, parents) entry: all channels merged in
+    color with the detected objects outlined. parents are the parent ROIs
+    as (name, x points, y points) in picture coordinates. Never raises."""
     merged = results_merge_picture(run_dir, configs)
-    if merged is not None:
-        pictures.append(merged)
-    try:
-        folder = os.path.join(to_text(run_dir), "Overlays")
-        if not os.path.isdir(folder):
-            return pictures
-        for name in sorted(os.listdir(folder)):
-            if len(pictures) >= RESULTS_MAX_PICTURES:
-                break
-            if not to_text(name).lower().endswith(".tif"):
-                continue
-            imp = IJ.openImage(os.path.join(folder, name))
-            if imp is None:
-                continue
-            try:
-                processor = imp.getProcessor()
-                longest = max(processor.getWidth(), processor.getHeight())
-                if longest > RESULTS_PICTURE_SIZE:
-                    factor = RESULTS_PICTURE_SIZE / float(longest)
-                    processor.setInterpolationMethod(ImageProcessor.BILINEAR)
-                    processor = processor.resize(
-                        max(1, int(processor.getWidth() * factor)), max(1, int(processor.getHeight() * factor)), True
-                    )
-                caption = to_text(name)
-                marker = caption.find("_C")
-                if "_Objects_Overlay" in caption and marker >= 0:
-                    caption = caption[marker + 1:caption.index("_Objects_Overlay")].replace("_", " ") + " - detected objects"
-                pictures.append((caption, processor.getBufferedImage()))
-            finally:
-                safe_close_image(imp)
-    except ANY_ERROR:
-        pass
-    return pictures
+    if merged is None:
+        return []
+    return [merged]
 
 
 MERGE_COLORS = {
@@ -892,6 +943,7 @@ def results_merge_picture(run_dir, configs):
         size = None
         full = None
         used = 0
+        parent_outlines = []
         for name in sorted(os.listdir(folder)):
             text = to_text(name)
             if not text.endswith("_PREP.tif"):
@@ -962,24 +1014,17 @@ def results_merge_picture(run_dir, configs):
                         drawn += 1
                 parents = os.path.join(roi_folder, "Parent_ROIs_Input.zip")
                 if os.path.isfile(parents):
-                    graphics.setStroke(BasicStroke(2.0))
-                    graphics.setFont(Font("SansSerif", Font.BOLD, 13))
                     for roi in load_rois_from_file(parents):
                         outline = roi.getPolygon()
-                        graphics.setColor(LOOK_OUTLINE)
-                        graphics.drawPolygon(
-                            [int(round(value * factor)) for value in outline.xpoints[:outline.npoints]],
-                            [int(round(value * factor)) for value in outline.ypoints[:outline.npoints]],
-                            outline.npoints
-                        )
-                        bounds = roi.getBounds()
-                        label = roi_name(roi, "")
-                        if label != "":
-                            graphics.drawString(label, int(bounds.x * factor) + 6, int(bounds.y * factor) + 18)
+                        parent_outlines.append((
+                            roi_name(roi, ""),
+                            [value * factor for value in outline.xpoints[:outline.npoints]],
+                            [value * factor for value in outline.ypoints[:outline.npoints]]
+                        ))
         finally:
             graphics.dispose()
         caption = "All channels" + (" - " + format_count(drawn) + " detected objects outlined" if drawn > 0 else "")
-        return (caption, image)
+        return (caption, image, parent_outlines)
     except ANY_ERROR:
         return None
 
@@ -1117,211 +1162,298 @@ class DropZonePanel(JPanel):
 
 
 class ResultsCanvas(JPanel):
-    """Draws the tiles, the chart and the overlay pictures of one run."""
+    """The organoid map: the picture of the run in a round window, one ring
+    per parent ROI around it (its arc is that region's share of the largest
+    value), the headline figures on the left and the regions on the right.
+    Pointing at a ring or at a region lights it up, with its outline on the
+    picture."""
 
     def __init__(self):
         JPanel.__init__(self)
         self.data = None
         self.pictures = []
         self.progress = 1.0
+        self.hover = None
         self.setOpaque(True)
+        watcher = RingWatcher(self)
+        self.addMouseMotionListener(watcher)
+        self.addMouseListener(watcher)
+
+    # ----- geometry, shared by painting and pointing -----
+
+    def ring_values(self):
+        """(labels, values, unit) of the rings, at most RING_LIMIT of them."""
+        if self.data is None or self.data.get("bars") is None:
+            return ([], [], "count")
+        bars = self.data["bars"]
+        values = bars["series"][0]["values"]
+        return (bars["labels"][:RING_LIMIT], values[:RING_LIMIT], bars.get("unit", "count"))
+
+    def geometry(self):
+        width = self.getWidth()
+        height = self.getHeight()
+        labels, values, unit = self.ring_values()
+        count = len(labels)
+        side = 250 if width >= 1040 else 200
+        show_right = width >= 820
+        map_left = side
+        map_right = width - (side if show_right else 0)
+        center_x = (map_left + map_right) / 2.0
+        center_y = height / 2.0
+        outer = max(40.0, min(map_right - map_left, height) / 2.0 - 30.0)
+        band = 16.0
+        gap = 10.0
+        if outer - count * (band + gap) < 70:
+            band = 9.0
+            gap = 6.0
+        rings = []
+        for index in range(count):
+            rings.append((outer - index * (band + gap) - band / 2.0, band))
+        picture = max(20.0, outer - count * (band + gap) - 6.0)
+        rows = []
+        if show_right:
+            row_top = max(70.0, center_y - (count * 46) / 2.0)
+            for index in range(count):
+                rows.append((map_right + 6, row_top + index * 46, side - 30, 46))
+        return {
+            "width": width, "height": height, "side": side, "show_right": show_right,
+            "map_left": map_left, "map_right": map_right, "x": center_x, "y": center_y,
+            "rings": rings, "band": band, "picture": picture, "rows": rows
+        }
+
+    def ring_at(self, x, y):
+        """Index of the ring or region row under a point, or None."""
+        shape = self.geometry()
+        distance = math.sqrt((x - shape["x"]) ** 2 + (y - shape["y"]) ** 2)
+        for index in range(len(shape["rings"])):
+            radius, band = shape["rings"][index]
+            if abs(distance - radius) <= band / 2.0 + 4:
+                return index
+        for index in range(len(shape["rows"])):
+            left, top, wide, high = shape["rows"][index]
+            if left <= x <= left + wide and top <= y <= top + high:
+                return index
+        return None
+
+    def point_at(self, x, y):
+        found = self.ring_at(x, y)
+        if found != self.hover:
+            self.hover = found
+            self.repaint()
+
+    # ----- painting -----
 
     def paintComponent(self, graphics):
         self.super__paintComponent(graphics)
         look_smooth(graphics)
-        width = self.getWidth()
-        height = self.getHeight()
-        dark = look_is_dark()
-        back = look_color("Panel.background", Color(245, 245, 245))
-        text = look_color("Label.foreground", Color.black)
-        faint = look_mix(text, back, 0.45)
-        card = look_mix(back, Color.white if dark else Color.black, 0.06)
+        shape = self.geometry()
+        width = shape["width"]
+        height = shape["height"]
+        own = LOOK_STATE["active"]
+        back = LOOK_DEEP if own else look_color("Panel.background", Color(245, 245, 245))
+        text = LOOK_TEXT if own else look_color("Label.foreground", Color.black)
+        faint = LOOK_FAINT if own else look_mix(text, back, 0.45)
+        line = LOOK_LINE if own else look_mix(back, text, 0.18)
+        if own:
+            # Deep water: lighter around the map, dark at the edges.
+            reach = float(max(width, height)) * 0.75
+            graphics.setPaint(RadialGradientPaint(
+                float(shape["x"]), float(shape["y"]), max(1.0, reach), [0.0, 1.0], [LOOK_PANEL, LOOK_DEEP]
+            ))
+            graphics.fillRect(0, 0, width, height)
         if self.data is None or (len(self.data["tiles"]) == 0 and len(self.pictures) == 0):
             self.paint_empty(graphics, width, height, text, faint)
             return
-        margin = 16
-        gap = 12
-        top = margin
-        tiles = self.data["tiles"]
-        if len(tiles) > 0:
-            columns = min(len(tiles), 4)
-            tile_rows = (len(tiles) + columns - 1) // columns
-            tile_width = (width - 2 * margin - gap * (columns - 1)) / float(columns)
-            tile_height = 122
-            for index in range(len(tiles)):
-                left = margin + (index % columns) * (tile_width + gap)
-                self.paint_tile(graphics, tiles[index], left, top + (index // columns) * (tile_height + gap),
-                                tile_width, tile_height, card, text, faint)
-            top += tile_rows * (tile_height + gap)
-        rest = height - top - margin
-        if rest < 120:
-            return
-        bars = self.data["bars"]
-        picture_count = len(self.pictures)
-        chart_width = width - 2 * margin
-        if bars is not None and picture_count > 0:
-            chart_width = int((width - 2 * margin - gap) * 0.36)
-        if bars is not None:
-            self.paint_chart(graphics, bars, margin, top, chart_width, rest, card, text, faint)
-        if picture_count > 0:
-            left = margin if bars is None else margin + chart_width + gap
-            area = width - margin - left
-            each = (area - gap * (picture_count - 1)) / float(picture_count)
-            for index in range(picture_count):
-                self.paint_picture(graphics, self.pictures[index], left + index * (each + gap), top, each, rest, card, faint)
+        self.paint_figures(graphics, shape, text, faint)
+        self.paint_map(graphics, shape, back, text, faint, line)
+        if shape["show_right"]:
+            self.paint_regions(graphics, shape, text, faint, line)
 
     def paint_empty(self, graphics, width, height, text, faint):
-        base = self.getFont()
-        graphics.setFont(base.deriveFont(Font.BOLD, 20.0))
+        graphics.setFont(look_font("figure", 34))
         graphics.setColor(text)
         headline = "No results yet"
         graphics.drawString(headline, (width - graphics.getFontMetrics().stringWidth(headline)) // 2, height // 2 - 6)
-        graphics.setFont(base.deriveFont(Font.PLAIN, 13.0))
+        graphics.setFont(look_font("ui", 13))
         graphics.setColor(faint)
         hint = "Open an image on the Session tab and press '3. Run analysis'."
         shown_width = min(graphics.getFontMetrics().stringWidth(hint), width - 40)
-        paint_fitted(graphics, hint, (width - shown_width) // 2, height // 2 + 20, width - 40)
+        paint_fitted(graphics, hint, (width - shown_width) // 2, height // 2 + 22, width - 40)
 
-    def paint_tile(self, graphics, tile, left, top, width, height, card, text, faint):
-        graphics.setColor(card)
-        graphics.fill(RoundRectangle2D.Float(left, top, width, height, CARD_ARC, CARD_ARC))
-        old_clip = graphics.getClip()
-        graphics.clipRect(int(left), int(top), int(width), int(height))
-        pad = 20
-        ring = 64.0
-        has_ring = tile["kind"] == "percent" and width >= 250
-        room = width - 2 * pad - (ring + 16 if has_ring else 0)
-        base = self.getFont()
-        graphics.setColor(tile["color"])
-        graphics.fillOval(int(left + pad), int(top + 21), 9, 9)
-        graphics.setFont(base.deriveFont(Font.PLAIN, 13.0))
-        graphics.setColor(faint)
-        paint_fitted(graphics, tile["title"], left + pad + 16, top + 30, room - 16)
-        shown = tile["value"] * self.progress
-        if tile["kind"] == "percent":
-            figure = "%.1f%%" % shown
-            final = "%.1f%%" % tile["value"]
-        else:
-            figure = format_count(shown)
-            final = format_count(tile["value"])
-        # The figure is as large as fits its final text, so it never grows
-        # out of the card while it counts up.
-        size = 40.0
-        graphics.setFont(base.deriveFont(Font.BOLD, size))
-        while size > 18.0 and graphics.getFontMetrics().stringWidth(final) > room:
-            size -= 2.0
-            graphics.setFont(base.deriveFont(Font.BOLD, size))
-        graphics.setColor(text)
-        graphics.drawString(figure, int(left + pad), int(top + 78))
-        graphics.setFont(base.deriveFont(Font.PLAIN, 12.0))
-        graphics.setColor(faint)
-        paint_fitted(graphics, tile["note"], left + pad, top + 102, room)
-        if has_ring:
-            ring_left = left + width - ring - pad
-            ring_top = top + (height - ring) / 2.0
-            graphics.setStroke(BasicStroke(7.0, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND))
-            graphics.setColor(look_mix(card, text, 0.12))
-            graphics.draw(Arc2D.Float(ring_left, ring_top, ring, ring, 0.0, 360.0, Arc2D.OPEN))
+    def paint_figures(self, graphics, shape, text, faint):
+        """Left: one large figure per measurement."""
+        room = shape["side"] - 44
+        tiles = self.data["tiles"]
+        step = 112
+        fit = max(1, int((shape["height"] - 40) // step))
+        tiles = tiles[:fit]
+        top = max(28.0, shape["y"] - len(tiles) * step / 2.0)
+        for index in range(len(tiles)):
+            tile = tiles[index]
+            base = top + index * step
             graphics.setColor(tile["color"])
-            sweep = -360.0 * max(0.0, min(100.0, shown)) / 100.0
-            graphics.draw(Arc2D.Float(ring_left, ring_top, ring, ring, 90.0, sweep, Arc2D.OPEN))
-        graphics.setClip(old_clip)
-
-    def paint_chart(self, graphics, bars, left, top, width, height, card, text, faint):
-        graphics.setColor(card)
-        graphics.fill(RoundRectangle2D.Float(left, top, width, height, CARD_ARC, CARD_ARC))
-        old_clip = graphics.getClip()
-        graphics.clipRect(int(left), int(top), int(width), int(height))
-        try:
-            self.paint_chart_inside(graphics, bars, left, top, width, height, card, text, faint)
-        finally:
-            graphics.setClip(old_clip)
-
-    def paint_chart_inside(self, graphics, bars, left, top, width, height, card, text, faint):
-        base = self.getFont()
-        graphics.setFont(base.deriveFont(Font.BOLD, 14.0))
-        graphics.setColor(text)
-        paint_fitted(graphics, "Objects per region", left + 20, top + 30, width - 40)
-        series = bars["series"]
-        labels = bars["labels"]
-        # Legend: entries that do not fit the row are left out, never overlapped.
-        graphics.setFont(base.deriveFont(Font.PLAIN, 12.0))
-        metrics = graphics.getFontMetrics()
-        legend_left = left + 20
-        for entry in series:
-            needed = 16 + metrics.stringWidth(entry["name"])
-            if legend_left + needed > left + width - 20:
-                break
-            graphics.setColor(entry["color"])
-            graphics.fillOval(int(legend_left), int(top + 45), 9, 9)
+            graphics.fillOval(26, int(base + 3), 8, 8)
+            graphics.setFont(look_font("ui_semibold", 11))
             graphics.setColor(faint)
-            graphics.drawString(entry["name"], int(legend_left + 16), int(top + 54))
-            legend_left += needed + 18
+            paint_fitted(graphics, tile["title"].upper(), 42, base + 12, room - 16)
+            shown = tile["value"] * self.progress
+            if tile["kind"] == "percent":
+                figure = "%.1f%%" % shown
+                final = "%.1f%%" % tile["value"]
+            else:
+                figure = format_count(shown)
+                final = format_count(tile["value"])
+            size = 54
+            graphics.setFont(look_font("figure", size))
+            while size > 24 and graphics.getFontMetrics().stringWidth(final) > room:
+                size -= 4
+                graphics.setFont(look_font("figure", size))
+            graphics.setColor(text)
+            graphics.drawString(figure, 26, int(base + 62))
+            graphics.setFont(look_font("ui", 12))
+            graphics.setColor(faint)
+            paint_fitted(graphics, tile["note"], 26, base + 84, room)
+
+    def paint_map(self, graphics, shape, back, text, faint, line):
+        labels, values, unit = self.ring_values()
         highest = 0.0
-        for entry in series:
-            for number in entry["values"]:
-                if number is not None and number > highest:
-                    highest = number
+        for number in values:
+            if number is not None and number > highest:
+                highest = number
+        if unit == "percent":
+            highest = 100.0
         if highest <= 0:
             highest = 1.0
-        plot_left = left + 24
-        plot_right = left + width - 24
-        plot_top = top + 92
-        plot_bottom = top + height - 40
-        if plot_bottom - plot_top < 40 or len(labels) == 0:
-            return
-        graphics.setStroke(BasicStroke(1.0))
-        graphics.setColor(look_mix(card, text, 0.18))
-        graphics.drawLine(int(plot_left), int(plot_bottom), int(plot_right), int(plot_bottom))
-        group_width = (plot_right - plot_left) / float(len(labels))
-        bar_width = min(46.0, (group_width * 0.72) / len(series))
-        for group in range(len(labels)):
-            start = plot_left + group * group_width + (group_width - bar_width * len(series)) / 2.0
-            for position in range(len(series)):
-                number = series[position]["values"][group]
-                if number is None:
-                    continue
-                bar_height = (plot_bottom - plot_top) * (number / highest) * self.progress
-                bar_left = start + position * bar_width
-                graphics.setColor(series[position]["color"])
-                graphics.fill(RoundRectangle2D.Float(bar_left + 3, plot_bottom - bar_height, bar_width - 6, bar_height, 6.0, 6.0))
-                if bar_height > 6:
-                    graphics.fillRect(int(bar_left + 3), int(plot_bottom - 4), int(bar_width - 6), 4)
-                figure = format_count(number * self.progress)
-                # A value is written above its bar only where it has room.
-                if metrics.stringWidth(format_count(number)) <= bar_width + 2:
-                    graphics.setColor(text)
-                    graphics.drawString(figure, int(bar_left + (bar_width - metrics.stringWidth(figure)) / 2.0),
-                                        int(plot_bottom - bar_height - 6))
-            graphics.setColor(faint)
-            label = to_text(labels[group])
-            label_room = group_width - 8
-            if metrics.stringWidth(label) > label_room:
-                paint_fitted(graphics, label, plot_left + group * group_width + 4, plot_bottom + 20, label_room)
-            else:
-                graphics.drawString(label, int(plot_left + group * group_width + (group_width - metrics.stringWidth(label)) / 2.0),
-                                    int(plot_bottom + 20))
+        center_x = shape["x"]
+        center_y = shape["y"]
+        for index in range(len(shape["rings"])):
+            radius, band = shape["rings"][index]
+            color = RING_COLORS[index % len(RING_COLORS)]
+            dimmed = self.hover is not None and self.hover != index
+            graphics.setStroke(BasicStroke(float(band)))
+            graphics.setColor(line)
+            graphics.draw(Ellipse2D.Float(center_x - radius, center_y - radius, 2 * radius, 2 * radius))
+            number = values[index]
+            if number is None or number <= 0:
+                continue
+            sweep = -360.0 * min(1.0, number / highest) * self.progress
+            arc = Arc2D.Float(center_x - radius, center_y - radius, 2 * radius, 2 * radius, 90.0, sweep, Arc2D.OPEN)
+            if not dimmed:
+                # The glow: the same arc, wider and faint, under the arc itself.
+                for halo in [(band + 14.0, 26), (band + 7.0, 46)]:
+                    graphics.setStroke(BasicStroke(halo[0], BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND))
+                    graphics.setColor(Color(color.getRed(), color.getGreen(), color.getBlue(), halo[1]))
+                    graphics.draw(arc)
+            graphics.setStroke(BasicStroke(band - 4.0, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND))
+            graphics.setColor(look_mix(color, back, 0.62) if dimmed else color)
+            graphics.draw(arc)
+        self.paint_picture(graphics, shape, text, faint, line)
 
-    def paint_picture(self, graphics, picture, left, top, width, height, card, faint):
-        graphics.setColor(card)
-        graphics.fill(RoundRectangle2D.Float(left, top, width, height, CARD_ARC, CARD_ARC))
-        image = picture[1]
-        room_width = width - 32
-        room_height = height - 62
-        if room_width < 20 or room_height < 20:
+    def paint_picture(self, graphics, shape, text, faint, line):
+        """The picture of the run in the round window at the center."""
+        center_x = shape["x"]
+        center_y = shape["y"]
+        radius = shape["picture"]
+        window = Ellipse2D.Float(center_x - radius, center_y - radius, 2 * radius, 2 * radius)
+        if len(self.pictures) == 0:
+            graphics.setColor(line)
+            graphics.setStroke(BasicStroke(1.5))
+            graphics.draw(window)
             return
-        scale = min(room_width / float(image.getWidth()), room_height / float(image.getHeight()))
-        shown_width = int(image.getWidth() * scale)
-        shown_height = int(image.getHeight() * scale)
-        image_left = int(left + (width - shown_width) / 2.0)
-        image_top = int(top + 16 + (room_height - shown_height) / 2.0)
+        picture = self.pictures[0]
+        image = picture[1]
+        parents = picture[2] if len(picture) > 2 else []
+        # Cover the round window: the shorter side of the picture fills it.
+        scale = 2 * radius / float(min(image.getWidth(), image.getHeight()))
+        left = center_x - image.getWidth() * scale / 2.0
+        top = center_y - image.getHeight() * scale / 2.0
         old_clip = graphics.getClip()
-        graphics.clip(RoundRectangle2D.Float(image_left, image_top, shown_width, shown_height, 10.0, 10.0))
-        graphics.drawImage(image, image_left, image_top, shown_width, shown_height, None)
+        graphics.clip(window)
+        graphics.drawImage(image, int(left), int(top), int(image.getWidth() * scale), int(image.getHeight() * scale), None)
+        for index in range(len(parents)):
+            name, xs, ys = parents[index]
+            if len(xs) < 3:
+                continue
+            path = Path2D.Float()
+            path.moveTo(left + xs[0] * scale, top + ys[0] * scale)
+            for corner in range(1, len(xs)):
+                path.lineTo(left + xs[corner] * scale, top + ys[corner] * scale)
+            path.closePath()
+            if self.hover == index:
+                color = RING_COLORS[index % len(RING_COLORS)]
+                graphics.setColor(Color(color.getRed(), color.getGreen(), color.getBlue(), 46))
+                graphics.fill(path)
+                graphics.setStroke(BasicStroke(2.5))
+                graphics.setColor(color)
+                graphics.draw(path)
+            elif self.hover is None:
+                graphics.setStroke(BasicStroke(1.0))
+                graphics.setColor(Color(221, 243, 245, 90))
+                graphics.draw(path)
         graphics.setClip(old_clip)
-        graphics.setFont(self.getFont().deriveFont(Font.PLAIN, 12.0))
+        graphics.setStroke(BasicStroke(2.0))
+        graphics.setColor(line)
+        graphics.draw(window)
+
+    def paint_regions(self, graphics, shape, text, faint, line):
+        """Right: the regions, one row per ring."""
+        labels, values, unit = self.ring_values()
+        rows = shape["rows"]
+        if len(rows) == 0:
+            return
+        left = rows[0][0]
+        wide = rows[0][2]
+        graphics.setFont(look_font("ui_semibold", 11))
         graphics.setColor(faint)
-        paint_fitted(graphics, picture[0], left + 16, top + height - 18, width - 32)
+        heading = "OBJECTS BY REGION" if unit == "count" else "POSITIVE AREA BY REGION"
+        paint_fitted(graphics, heading, left + 8, rows[0][1] - 16, wide - 8)
+        for index in range(len(rows)):
+            row_left, row_top, row_wide, row_high = rows[index]
+            color = RING_COLORS[index % len(RING_COLORS)]
+            if self.hover == index:
+                graphics.setColor(Color(color.getRed(), color.getGreen(), color.getBlue(), 34))
+                graphics.fill(RoundRectangle2D.Float(row_left, row_top + 2, row_wide, row_high - 4, 12.0, 12.0))
+            graphics.setColor(line)
+            graphics.setStroke(BasicStroke(1.0))
+            graphics.drawLine(int(row_left + 8), int(row_top + row_high), int(row_left + row_wide - 8), int(row_top + row_high))
+            number = values[index]
+            if number is None:
+                figure = "-"
+            elif unit == "percent":
+                figure = "%.1f%%" % (number * self.progress)
+            else:
+                figure = format_count(number * self.progress)
+            graphics.setFont(look_font("figure", 26))
+            figure_wide = graphics.getFontMetrics().stringWidth(
+                figure if number is None else ("%.1f%%" % number if unit == "percent" else format_count(number))
+            )
+            graphics.setColor(text)
+            graphics.drawString(figure, int(row_left + row_wide - 10 - figure_wide), int(row_top + 31))
+            graphics.setColor(color)
+            graphics.fillOval(int(row_left + 10), int(row_top + 19), 9, 9)
+            graphics.setFont(look_font("ui", 13))
+            graphics.setColor(text if self.hover in (None, index) else faint)
+            paint_fitted(graphics, labels[index], row_left + 28, row_top + 28, row_wide - 28 - figure_wide - 22)
+        note_top = rows[-1][1] + rows[-1][3] + 26
+        if note_top < shape["height"] - 14:
+            graphics.setFont(look_font("ui", 12))
+            graphics.setColor(faint)
+            more = len(self.data["bars"]["labels"]) - len(labels)
+            note = "Point at a ring to see its region." if more <= 0 else str(more) + " more regions are in the tables."
+            paint_fitted(graphics, note, left + 8, note_top, wide - 8)
+
+
+class RingWatcher(MouseAdapter):
+    """Tells the organoid map where the pointer is."""
+
+    def __init__(self, canvas):
+        self.canvas = canvas
+
+    def mouseMoved(self, event):
+        self.canvas.point_at(event.getX(), event.getY())
+
+    def mouseExited(self, event):
+        self.canvas.point_at(-1000, -1000)
 
 
 class ResultsAnimation(ActionListener):
@@ -1426,8 +1558,21 @@ def tidy_collect(container, grids, rows, notes):
             tidy_collect(child, grids, rows, notes)
 
 
+def tidy_plain(label):
+    """Put a label back to its own text and size, so that tidy_tab can run
+    again after the look (and with it the font) has changed."""
+    kept = label.getClientProperty("cellquant.text")
+    if kept is None:
+        label.putClientProperty("cellquant.text", to_text(label.getText()))
+    else:
+        label.setText(kept)
+    label.setPreferredSize(None)
+    label.setMinimumSize(None)
+
+
 def tidy_tab(tab):
-    """Give the forms and button rows of one tab one consistent shape."""
+    """Give the forms and button rows of one tab one consistent shape.
+    It can be called again, for example after the look has changed."""
     grids = []
     rows = []
     notes = []
@@ -1441,12 +1586,14 @@ def tidy_tab(tab):
         for child in panel.getComponents():
             constraints = layout.getConstraints(child)
             if isinstance(child, JLabel) and constraints.gridx == 0 and constraints.gridwidth == 1:
+                tidy_plain(child)
                 labels.append((layout, child, constraints))
                 widest = max(widest, child.getPreferredSize().width)
             elif isinstance(child, JLabel) and constraints.gridx >= 2:
                 # A hint behind a field: secondary text, wrapped when long so
                 # that it never forces the form wider than its column.
                 child.putClientProperty("FlatLaf.style", "foreground: $Label.disabledForeground")
+                tidy_plain(child)
                 hint_size = child.getPreferredSize()
                 if hint_size.width > FORM_HINT_CAP:
                     child.setText("<html>" + html_text(child.getText()) + "</html>")
@@ -1460,12 +1607,14 @@ def tidy_tab(tab):
                 # Buttons behind fields (Browse, Apply preset): one width per form.
                 constraints.fill = GridBagConstraints.HORIZONTAL
                 layout.setConstraints(child, constraints)
-    width = min(widest, FORM_LABEL_CAP)
+    # A few pixels to spare: text is measured a little differently from one
+    # screen to the next, and a label must never lose its last letter.
+    width = min(widest + 6, FORM_LABEL_CAP)
     for entry in labels:
         layout, label, constraints = entry
         wanted = label.getPreferredSize()
         height = wanted.height
-        if wanted.width > width:
+        if wanted.width + 6 > width:
             # Too long for the column: wrap it instead of widening the column.
             label.setText("<html><div style='text-align: right'>" + html_text(label.getText()) + "</div></html>")
             view = label.getClientProperty(BasicHTML.propertyKey)
@@ -1483,7 +1632,8 @@ def tidy_tab(tab):
     # A form inside a scrolling area starts at the top instead of floating
     # in the middle of the free space.
     for panel in grids:
-        if isinstance(panel.getParent(), JViewport):
+        if isinstance(panel.getParent(), JViewport) and panel.getClientProperty("cellquant.pinned") is None:
+            panel.putClientProperty("cellquant.pinned", "yes")
             filler = GridBagConstraints()
             filler.gridx = 0
             filler.gridy = 1000
@@ -1499,11 +1649,13 @@ def tidy_tab(tab):
             continue
         layout = panel.getLayout()
         layout.setHgap(8)
+        for button in buttons:
+            button.setPreferredSize(None)
         high = max([button.getPreferredSize().height for button in buttons])
         wide = max([button.getPreferredSize().width for button in buttons])
         even = len(buttons) >= 2 and (wide + 8) * len(buttons) <= BUTTON_ROW_LIMIT
         for button in buttons:
-            button.setPreferredSize(Dimension(wide if even else button.getPreferredSize().width, high))
+            button.setPreferredSize(Dimension((wide if even else button.getPreferredSize().width) + 4, high))
 
     # Explanations: secondary text.
     for note in notes:
@@ -1600,7 +1752,7 @@ class CellQuantStudioUniversal(JFrame):
         if base is None:
             base = Font("SansSerif", Font.PLAIN, 13)
         title = JLabel(APP_NAME)
-        title.setFont(base.deriveFont(Font.BOLD, 24.0))
+        title.setFont(look_font("ui_bold", 24))
         subtitle = JLabel(
             "Count cells and measure markers in fluorescence microscopy images, the same way every time.  Version " + APP_VERSION
         )
@@ -1616,7 +1768,7 @@ class CellQuantStudioUniversal(JFrame):
         self.look_combo = JComboBox(LOOK_NAMES)
         self.look_combo.setSelectedItem(look_preference())
         self.look_combo.setToolTipText(
-            "Dark and Light change the whole of Fiji while this window is open; Fiji default leaves it alone. The choice is remembered."
+            "Dark gives the whole of Fiji this window's look while it is open; Fiji default leaves Fiji alone. The choice is remembered."
         )
         self.look_combo.addActionListener(self.look_changed)
         side.add(look_label)
@@ -1635,6 +1787,10 @@ class CellQuantStudioUniversal(JFrame):
             look_restore()
         else:
             look_install(chosen)
+        # Another look means another font: shape the tabs again.
+        for tab_index in range(self.main_tabs.getTabCount()):
+            tidy_tab(self.main_tabs.getComponentAt(tab_index))
+        self.revalidate()
         self.repaint()
 
     def style_buttons(self, container):
