@@ -41,6 +41,8 @@ from java.awt import (
 )
 from java.awt.event import WindowAdapter, ActionListener
 from java.awt.geom import RoundRectangle2D, Arc2D
+from java.awt.image import BufferedImage
+from ij.process import ImageStatistics, FloatProcessor, ColorProcessor, Blitter
 from java.util import HashMap
 from java.awt.dnd import DropTarget, DnDConstants, DropTargetAdapter
 from java.awt.datatransfer import DataFlavor
@@ -764,10 +766,14 @@ def results_from_summary(headers, rows, configs):
     return {"tiles": tiles, "bars": bars, "regions": len(rows)}
 
 
-def results_pictures(run_dir):
-    """Small copies of the first overlay pictures of a run, as
-    (caption, java.awt.Image) pairs. Never raises."""
+def results_pictures(run_dir, configs=None):
+    """The pictures of a run for the Results tab, as (caption,
+    java.awt.Image) pairs: all channels merged in color with the detected
+    objects outlined, then the first object overlay. Never raises."""
     pictures = []
+    merged = results_merge_picture(run_dir, configs)
+    if merged is not None:
+        pictures.append(merged)
     try:
         folder = os.path.join(to_text(run_dir), "Overlays")
         if not os.path.isdir(folder):
@@ -799,6 +805,267 @@ def results_pictures(run_dir):
     except ANY_ERROR:
         pass
     return pictures
+
+
+MERGE_COLORS = {
+    "Blue": (70, 120, 255), "Green": (40, 255, 110), "Red": (255, 60, 60), "Magenta": (255, 60, 255),
+    "Cyan": (40, 230, 255), "Yellow": (255, 225, 40), "Grays": (255, 255, 255), "Original": (255, 255, 255)
+}
+MERGE_SERIES = [(70, 120, 255), (40, 255, 110), (255, 60, 60), (255, 60, 255)]
+RESULTS_MAX_OUTLINES = 40000
+
+
+def picture_small_size(width, height, longest):
+    factor = min(1.0, longest / float(max(width, height)))
+    return (max(1, int(round(width * factor))), max(1, int(round(height * factor))), factor)
+
+
+def picture_unit_range(processor):
+    """A float copy of an image plane scaled so that its minimum is 0 and its
+    99.8th percentile is 1 (brighter pixels stay above 1 and are clipped later)."""
+    plane = processor.convertToFloat()
+    stats = ImageStatistics.getStatistics(plane, Measurements.MIN_MAX, None)
+    high = stats.max
+    if stats.max > stats.min:
+        wanted = 0.998 * stats.pixelCount
+        seen = 0
+        counts = stats.getHistogram()
+        for index in range(len(counts)):
+            seen += int(counts[index])
+            if seen >= wanted:
+                high = stats.histMin + (index + 1) * stats.binSize
+                break
+    span = high - stats.min
+    if span <= 0:
+        span = 1.0
+    plane.subtract(stats.min)
+    plane.multiply(1.0 / span)
+    return plane
+
+
+def results_merge_picture(run_dir, configs):
+    """All prepared channels of a run in one color picture, each in the color
+    of its lookup table, with the parent ROIs and the detected objects
+    outlined. Returns (caption, java.awt.Image) or None. Never raises, and
+    reads only files the run has written."""
+    try:
+        run_dir = to_text(run_dir)
+        folder = os.path.join(run_dir, "Prepared")
+        if not os.path.isdir(folder):
+            return None
+        by_channel = {}
+        for config in configs or []:
+            by_channel[config["channel"]] = config
+        sums = None
+        size = None
+        full = None
+        used = 0
+        for name in sorted(os.listdir(folder)):
+            text = to_text(name)
+            if not text.endswith("_PREP.tif"):
+                continue
+            channel = None
+            for number in range(1, MAX_CHANNELS + 1):
+                if ("_C" + str(number) + "_") in text:
+                    channel = number
+            imp = IJ.openImage(os.path.join(folder, text))
+            if imp is None:
+                continue
+            try:
+                processor = imp.getProcessor()
+                if processor.getBitDepth() == 24:
+                    continue
+                if size is None:
+                    full = (processor.getWidth(), processor.getHeight())
+                    size = picture_small_size(full[0], full[1], RESULTS_PICTURE_SIZE)
+                    sums = [FloatProcessor(size[0], size[1]) for part in range(3)]
+                elif (processor.getWidth(), processor.getHeight()) != full:
+                    continue
+                if (size[0], size[1]) != full:
+                    processor.setInterpolationMethod(ImageProcessor.BILINEAR)
+                    processor = processor.resize(size[0], size[1], True)
+                plane = picture_unit_range(processor)
+                config = by_channel.get(channel)
+                color = MERGE_SERIES[used % len(MERGE_SERIES)]
+                if config is not None and config.get("lut") in MERGE_COLORS:
+                    color = MERGE_COLORS[config["lut"]]
+                for part in range(3):
+                    if color[part] > 0:
+                        tinted = plane.duplicate()
+                        tinted.multiply(float(color[part]))
+                        sums[part].copyBits(tinted, 0, 0, Blitter.ADD)
+                used += 1
+            finally:
+                safe_close_image(imp)
+        if used == 0:
+            return None
+        parts = []
+        for part in range(3):
+            sums[part].setMinAndMax(0.0, 255.0)
+            parts.append(sums[part].convertToByte(True).getPixels())
+        merged = ColorProcessor(size[0], size[1])
+        merged.setRGB(parts[0], parts[1], parts[2])
+        image = merged.getBufferedImage()
+        graphics = image.createGraphics()
+        try:
+            look_smooth(graphics)
+            factor = size[2]
+            roi_folder = os.path.join(run_dir, "ROIs")
+            drawn = 0
+            if os.path.isdir(roi_folder):
+                graphics.setStroke(BasicStroke(1.0))
+                graphics.setColor(Color(255, 255, 255, 200))
+                for name in sorted(os.listdir(roi_folder)):
+                    if not to_text(name).endswith("_Objects.zip") or drawn >= RESULTS_MAX_OUTLINES:
+                        continue
+                    for roi in load_rois_from_file(os.path.join(roi_folder, name)):
+                        if drawn >= RESULTS_MAX_OUTLINES:
+                            break
+                        outline = roi.getPolygon()
+                        graphics.drawPolygon(
+                            [int(round(value * factor)) for value in outline.xpoints[:outline.npoints]],
+                            [int(round(value * factor)) for value in outline.ypoints[:outline.npoints]],
+                            outline.npoints
+                        )
+                        drawn += 1
+                parents = os.path.join(roi_folder, "Parent_ROIs_Input.zip")
+                if os.path.isfile(parents):
+                    graphics.setStroke(BasicStroke(2.0))
+                    graphics.setFont(Font("SansSerif", Font.BOLD, 13))
+                    for roi in load_rois_from_file(parents):
+                        outline = roi.getPolygon()
+                        graphics.setColor(LOOK_ACCENT)
+                        graphics.drawPolygon(
+                            [int(round(value * factor)) for value in outline.xpoints[:outline.npoints]],
+                            [int(round(value * factor)) for value in outline.ypoints[:outline.npoints]],
+                            outline.npoints
+                        )
+                        bounds = roi.getBounds()
+                        label = roi_name(roi, "")
+                        if label != "":
+                            graphics.drawString(label, int(bounds.x * factor) + 6, int(bounds.y * factor) + 18)
+        finally:
+            graphics.dispose()
+        caption = "All channels" + (" - " + format_count(drawn) + " detected objects outlined" if drawn > 0 else "")
+        return (caption, image)
+    except ANY_ERROR:
+        return None
+
+
+class PreviewPanel(JPanel):
+    """A small picture of the source image on the Session tab."""
+
+    def __init__(self):
+        JPanel.__init__(self)
+        self.picture = None
+        self.setPreferredSize(Dimension(260, 200))
+
+    def show_image(self, imp):
+        """Event thread: take a small copy of what the image window shows."""
+        self.picture = None
+        try:
+            if imp is not None:
+                shown = imp.getImage()
+                size = picture_small_size(imp.getWidth(), imp.getHeight(), 640)
+                small = BufferedImage(size[0], size[1], BufferedImage.TYPE_INT_RGB)
+                graphics = small.createGraphics()
+                try:
+                    look_smooth(graphics)
+                    graphics.drawImage(shown, 0, 0, size[0], size[1], None)
+                finally:
+                    graphics.dispose()
+                self.picture = small
+        except ANY_ERROR:
+            self.picture = None
+        self.repaint()
+
+    def paintComponent(self, graphics):
+        self.super__paintComponent(graphics)
+        look_smooth(graphics)
+        width = self.getWidth()
+        height = self.getHeight()
+        back = look_color("Panel.background", Color(245, 245, 245))
+        text = look_color("Label.foreground", Color.black)
+        if self.picture is None:
+            graphics.setColor(look_mix(text, back, 0.6))
+            graphics.setFont(self.getFont().deriveFont(Font.PLAIN, 13.0))
+            words = "The image appears here"
+            graphics.drawString(words, (width - graphics.getFontMetrics().stringWidth(words)) // 2, height // 2)
+            return
+        room_width = width - 16
+        room_height = height - 16
+        if room_width < 10 or room_height < 10:
+            return
+        scale = min(room_width / float(self.picture.getWidth()), room_height / float(self.picture.getHeight()))
+        shown_width = int(self.picture.getWidth() * scale)
+        shown_height = int(self.picture.getHeight() * scale)
+        left = (width - shown_width) // 2
+        top = (height - shown_height) // 2
+        old_clip = graphics.getClip()
+        graphics.clip(RoundRectangle2D.Float(left, top, shown_width, shown_height, 14.0, 14.0))
+        graphics.drawImage(self.picture, left, top, shown_width, shown_height, None)
+        graphics.setClip(old_clip)
+
+
+class DropZonePanel(JPanel):
+    """The place to drop an image file on the Session tab."""
+
+    STEPS = [
+        "Open an image and apply a preset",
+        "Prepare the enabled channels",
+        "Set thresholds; preview the masks",
+        "Load or draw the regions to measure",
+        "Run the analysis"
+    ]
+
+    def paintComponent(self, graphics):
+        self.super__paintComponent(graphics)
+        look_smooth(graphics)
+        width = self.getWidth()
+        height = self.getHeight()
+        back = look_color("Panel.background", Color(245, 245, 245))
+        text = look_color("Label.foreground", Color.black)
+        faint = look_mix(text, back, 0.45)
+        graphics.setColor(look_mix(back, LOOK_ACCENT, 0.06))
+        graphics.fill(RoundRectangle2D.Float(10.0, 10.0, width - 20.0, height - 20.0, 22.0, 22.0))
+        graphics.setColor(look_mix(back, LOOK_ACCENT, 0.7))
+        graphics.setStroke(BasicStroke(2.0, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND, 1.0, [8.0, 8.0], 0.0))
+        graphics.draw(RoundRectangle2D.Float(10.0, 10.0, width - 20.0, height - 20.0, 22.0, 22.0))
+        center = width // 2
+        block = 150 + 24 * len(self.STEPS)
+        top = max(24, (height - block) // 2)
+        # An arrow into a tray.
+        graphics.setStroke(BasicStroke(3.5, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND))
+        graphics.setColor(LOOK_ACCENT)
+        graphics.drawLine(center, top, center, top + 34)
+        graphics.drawLine(center - 12, top + 22, center, top + 34)
+        graphics.drawLine(center + 12, top + 22, center, top + 34)
+        graphics.drawPolyline([center - 26, center - 26, center + 26, center + 26], [top + 36, top + 48, top + 48, top + 36], 4)
+        base = self.getFont()
+        graphics.setFont(base.deriveFont(Font.BOLD, 19.0))
+        graphics.setColor(text)
+        headline = "Drop a microscopy image here"
+        graphics.drawString(headline, center - graphics.getFontMetrics().stringWidth(headline) // 2, top + 84)
+        graphics.setFont(base.deriveFont(Font.PLAIN, 13.0))
+        graphics.setColor(faint)
+        hint = "or use Browse, or the image that is open in Fiji"
+        graphics.drawString(hint, center - graphics.getFontMetrics().stringWidth(hint) // 2, top + 106)
+        metrics = graphics.getFontMetrics()
+        widest = 0
+        for step in self.STEPS:
+            widest = max(widest, metrics.stringWidth(step))
+        left = center - (widest + 30) // 2
+        for index in range(len(self.STEPS)):
+            line = top + 146 + 24 * index
+            if line > height - 20:
+                break
+            graphics.setColor(look_mix(back, LOOK_ACCENT, 0.35))
+            graphics.fillOval(left, line - 14, 20, 20)
+            graphics.setColor(text)
+            number = str(index + 1)
+            graphics.drawString(number, left + 10 - metrics.stringWidth(number) // 2, line)
+            graphics.setColor(faint)
+            graphics.drawString(self.STEPS[index], left + 30, line)
 
 
 class HeaderPanel(JPanel):
@@ -1185,7 +1452,7 @@ class CellQuantStudioUniversal(JFrame):
         bring it to the front. A failure here never fails the analysis."""
         try:
             self.results_canvas.data = results_from_summary(result["summary_headers"], result["summary_rows"], configs)
-            self.results_canvas.pictures = results_pictures(run_dir)
+            self.results_canvas.pictures = results_pictures(run_dir, configs)
             regions = self.results_canvas.data["regions"]
             self.results_caption.setText(
                 to_text(source_title) + "   -   " + str(regions) + (" region" if regions == 1 else " regions") +
@@ -1275,22 +1542,14 @@ class CellQuantStudioUniversal(JFrame):
         actions.add(JButton("Quick run", actionPerformed=self.quick_run_action))
         actions.add(JButton("Reset for next image", actionPerformed=self.reset_for_next_image))
 
-        self.drop_area = JTextArea()
-        self.drop_area.setEditable(False)
-        self.drop_area.setLineWrap(True)
-        self.drop_area.setWrapStyleWord(True)
-        self.drop_area.setFont(Font("SansSerif", Font.PLAIN, 15))
-        self.drop_area.setText(
-            "Drop one microscopy image here.\n\n"
-            "Recommended manual-threshold workflow:\n"
-            "1. Open an image and apply a preset.\n"
-            "2. Prepare the enabled channels.\n"
-            "3. Use each channel's Brightness/Contrast button.\n"
-            "4. Preview masks and adjust thresholds/morphology.\n"
-            "5. Load or draw parent ROIs.\n"
-            "6. Run analysis."
+        self.drop_area = DropZonePanel()
+        self.drop_area.setPreferredSize(Dimension(520, 260))
+        self.drop_area.setMinimumSize(Dimension(380, 200))
+        self.drop_area.setToolTipText(
+            "Recommended manual-threshold workflow: open an image and apply a preset; prepare the enabled channels; "
+            "use each channel's Brightness/Contrast button; preview masks and adjust thresholds/morphology; "
+            "load or draw parent ROIs; run the analysis."
         )
-        self.drop_area.setBorder(BorderFactory.createTitledBorder("Drag and drop"))
         DropTarget(self.drop_area, FileDropTarget(self))
 
         self.image_info_area = JTextArea()
@@ -1298,14 +1557,18 @@ class CellQuantStudioUniversal(JFrame):
         self.image_info_area.setLineWrap(True)
         self.image_info_area.setWrapStyleWord(True)
         self.image_info_area.setText("No source image selected.")
-        self.image_info_area.setBorder(BorderFactory.createTitledBorder("Source image"))
+        self.image_info_area.setBorder(BorderFactory.createEmptyBorder(8, 10, 8, 10))
+        self.source_preview = PreviewPanel()
+        info_scroll = JScrollPane(self.image_info_area)
+        info_scroll.setBorder(BorderFactory.createEmptyBorder())
+        info_scroll.setPreferredSize(Dimension(340, 200))
+        source_panel = JPanel(BorderLayout(6, 6))
+        source_panel.setBorder(BorderFactory.createTitledBorder("Source image"))
+        source_panel.add(self.source_preview, BorderLayout.CENTER)
+        source_panel.add(info_scroll, BorderLayout.EAST)
 
-        center = JSplitPane(
-            JSplitPane.HORIZONTAL_SPLIT,
-            JScrollPane(self.drop_area),
-            JScrollPane(self.image_info_area)
-        )
-        center.setResizeWeight(0.45)
+        center = JSplitPane(JSplitPane.HORIZONTAL_SPLIT, self.drop_area, source_panel)
+        center.setResizeWeight(0.4)
 
         self.status_area = JTextArea()
         self.status_area.setEditable(False)
@@ -2404,6 +2667,7 @@ class CellQuantStudioUniversal(JFrame):
         self.populate_calibration_fields()
 
     def update_source_info(self):
+        self.source_preview.show_image(self.source_imp)
         if self.source_imp is None:
             self.image_info_area.setText("No source image selected.")
             return
