@@ -841,7 +841,11 @@ def step_run_analysis(ctx, t):
     if len(marker_tiles) == 1:
         t.close(marker_tiles[0]["value"], positive / measured * 100.0, "the marker tile is positive area over measured area")
     t.equal(shown["bars"]["labels"], [row.get("Parent_ROI_Name") for row in window["summary"][1]], "one group of bars per parent ROI")
-    t.equal(len(app.results_canvas.pictures), 1, "the object overlay of the run is shown")
+    captions = [as_text(picture[0]) for picture in app.results_canvas.pictures]
+    t.equal(len(captions), 2, "the merged picture and the object overlay of the run are shown")
+    t.check(len(captions) == 2 and captions[0].startswith("All channels") and (str(counted) + " detected objects") in captions[0],
+            "the merged picture outlines every counted object")
+    t.check(app.source_preview.picture is not None, "the Session tab shows a small picture of the source image")
     t.equal(as_text(tabs.getTitleAt(0)), "Session", "the Session tab is still the first one")
     on_edt(lambda: tabs.setSelectedIndex(0), "back to the Session tab")
 

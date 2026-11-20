@@ -29,8 +29,9 @@ Read this section before comparing new numbers with old ones.
 
 ### Added
 
-- **Results tab.** After an analysis the window shows headline numbers (object counts, positive-area share), a chart of the object counts per parent ROI, and the object overlay image. It reads the summary table of the run; no table, file or number changes.
+- **Results tab.** After an analysis the window shows headline numbers (object counts, positive-area share), a chart of the object counts per parent ROI, a merged color picture of all channels with the parent ROIs and detected objects outlined, and the object overlay image. It reads the summary table and the saved files of the run; no table, file or number changes.
 - **Dark look**, with a banner and highlighted workflow buttons. It uses Fiji's FlatLaf dark theme, which applies to all Fiji windows while Cell Quant Studio is open; the previous look is put back when the window closes. **Look > Fiji default** in the banner switches it off, and the choice is remembered. Without FlatLaf the window keeps Fiji's look.
+- **Session tab:** a drop zone for the image file and a small picture of the source image. The workflow text of the old drop area is now its tooltip.
 - **Optional analysis modules**, each in its own file, with settings saved in profiles and a new **Analyses** tab. With a module off, every table is byte-for-byte unchanged (tested).
   - `cellquanttissue.py`: automatic tissue outline (Gaussian smoothing in micrometers, automatic threshold on a log scale, hole filling, region-size filter); window button and the batch region policy "Automatic tissue outline"; `tissue_outline.csv`, outline ROIs and a check image; `Tissue_Outlines/` in batches.
   - `cellquantdepth.py`: depth profile from the ROI outline (`depth_profile.csv`; object depth columns in `objects.csv`).

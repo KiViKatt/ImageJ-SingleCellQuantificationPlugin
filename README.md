@@ -17,14 +17,16 @@ Built-in tools check the results: object counts against manual point marks, mask
 
 > **Version 2.3.0.** This version has been run and tested in a real Fiji (Jython 2.7.4, ImageJ 1.54p, Java 21) and on the author's Zeiss CZI images. Upgrading from 2.2.x? Read [CHANGELOG.md](CHANGELOG.md) first: some results change on purpose. The earlier macros are kept in [legacy/](legacy/) and are not covered here.
 
-![The Results tab after an analysis: headline numbers, objects per region, and the overlay picture](docs/images/results_tab.jpg)
+![The Results tab after an analysis: headline numbers, objects per region, the merged color picture and the overlay picture](docs/images/results_tab.jpg)
 
 *The Results tab after an analysis of a synthetic test image.*
 
 ## Look and Results tab
 
-- **Results tab.** After "3. Run analysis" the window shows the run as a picture: one large number per measurement (objects counted, share of the area that is marker-positive), a chart of the object counts per parent ROI, and the object overlay image. Counts are added up over the parent ROIs; a positive-area share is the positive area of all ROIs divided by their area. Nothing new is measured or written: the numbers come from `roi_summary.csv`, which remains the record.
+- **Results tab.** After "3. Run analysis" the window shows the run as a picture: one large number per measurement (objects counted, share of the area that is marker-positive), a chart of the object counts per parent ROI, a picture of all channels merged in their own colors with the parent ROIs and every detected object outlined, and the object overlay image. Counts are added up over the parent ROIs; a positive-area share is the positive area of all ROIs divided by their area. Nothing new is measured or written: the numbers come from `roi_summary.csv`, which remains the record.
 - **Dark look.** The window opens in a dark theme (Fiji's own FlatLaf dark theme). A Swing theme applies to every Fiji window, so Fiji turns dark while Cell Quant Studio is open and gets its previous look back when the window closes. Choose **Look > Fiji default** at the top right to leave Fiji as it is; the choice is remembered.
+
+- **Session tab.** A drop zone for the image file with the workflow steps, and a small picture of the source image beside its description.
 
 ![The Session tab in the dark look](docs/images/session_tab.jpg)
 
