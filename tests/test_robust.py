@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Ivan Khimach
+
 # Cell Quant Studio Universal - tests of the robustness module
 # (cellquantrobust.py: a group difference across a grid of settings)
 #

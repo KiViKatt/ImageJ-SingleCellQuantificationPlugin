@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Ivan Khimach
+
 # Cell Quant Studio Universal - threshold spectrum of marker coverage (optional module)
 #
 # The positive-area fraction of a marker depends on one threshold chosen by
