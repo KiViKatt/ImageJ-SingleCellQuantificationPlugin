@@ -429,7 +429,7 @@ The automated tests build synthetic images with known answers and check the resu
   bash tests/run_tests.sh /path/to/Fiji.app "$PWD/tests/gui_smoke.py"
   ```
 
-  The first runs the engine and module tests (123 tests, 4296 checks, about 1 minute). The second runs the window test (29 steps); it opens windows for about half a minute.
+  The first runs the engine and module tests (125 tests, about 4300 checks, about 1 minute). The second runs the window test (29 steps); it opens windows for about half a minute.
 - **Selected tests only:** set `CELLQUANT_TEST_FILTER=word`.
 - **Large images:** set `CELLQUANT_JAVA_OPTS=-Xmx16g`.
 
