@@ -9,6 +9,7 @@
 
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Ivan Khimach
+# Copyright (C) 2026 Maksym Taran
 
 # Cell Quant Studio Universal - batch without the window
 #

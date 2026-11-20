@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Ivan Khimach
+# Copyright (C) 2026 Maksym Taran
 
 # Cell Quant Studio Universal - analysis engine
 #
@@ -35,11 +36,13 @@ from java.io import (
     ByteArrayOutputStream, DataOutputStream
 )
 from java.lang import Throwable as JavaThrowable
+from java.lang import Runtime
 from java.util import Properties
 from java.util.zip import ZipInputStream, ZipOutputStream, ZipEntry
 
 import os
 import time
+import threading
 import traceback
 import math
 import codecs
@@ -1156,8 +1159,81 @@ def pixel_fingerprint(imp):
     return (stats.mean, stats.stdDev, stats.min, stats.max)
 
 
-def apply_clahe(imp, block_size, histogram_bins, max_slope):
+# CLAHE is by far the slowest step on a large image (about 20 s for 4084 x
+# 4084 pixels on one core). The value of a pixel depends only on the pixels
+# within the block radius around it, so the image can be cut into horizontal
+# strips that overlap by that radius and are processed on several cores.
+# The result is pixel-identical to processing the image in one piece.
+CLAHE_STRIP_ROWS = 256
+CLAHE_STRIP_LIMIT = 16
+
+
+def clahe_strip_count(height):
+    """In how many strips an image of this height is processed."""
+    try:
+        cores = int(Runtime.getRuntime().availableProcessors())
+    except ANY_ERROR:
+        cores = 1
+    return max(1, min(cores, CLAHE_STRIP_LIMIT, int(height) // CLAHE_STRIP_ROWS))
+
+
+def clahe_in_strips(flat, imp, block_radius, bins, max_slope, strips):
+    """CLAHE on one 8-bit or 16-bit plane, strip by strip on worker
+    threads. Returns False (and leaves the image alone) when the image is
+    not of a kind this handles; raises what a strip raised."""
+    source = imp.getProcessor()
+    if imp.getStackSize() != 1 or source.getBitDepth() not in (8, 16):
+        return False
+    width = source.getWidth()
+    height = source.getHeight()
+    low = source.getMin()
+    high = source.getMax()
+    if not high > low:
+        # No display range to hand to the strips (setMinAndMax(0, 0) would
+        # mean "reset" there): leave such an image to the one-piece path.
+        return False
+    bounds = [int(round(height * index / float(strips))) for index in range(strips + 1)]
+    pieces = [None] * strips
+    errors = []
+
+    def work(index):
+        try:
+            first = bounds[index]
+            last = bounds[index + 1]
+            top = max(0, first - block_radius)
+            bottom = min(height, last + block_radius)
+            part = source.duplicate()
+            part.setRoi(0, top, width, bottom - top)
+            part = part.crop()
+            # A 16-bit plane is scaled by its display range inside CLAHE.
+            part.setMinAndMax(low, high)
+            part_imp = ImagePlus("CellQuant_clahe_strip", part)
+            flat.getInstance().run(part_imp, block_radius, bins, float(max_slope), None, False)
+            done = part_imp.getProcessor()
+            done.setRoi(0, first - top, width, last - first)
+            pieces[index] = (first, done.crop())
+        except ANY_ERROR as exc:
+            errors.append(exc)
+
+    workers = [threading.Thread(target=work, args=(index,)) for index in range(strips)]
+    for worker in workers:
+        worker.start()
+    for worker in workers:
+        worker.join()
+    if len(errors) > 0:
+        raise errors[0]
+    for piece in pieces:
+        source.insert(piece[1], 0, piece[0])
+    source.setMinAndMax(low, high)
+    return True
+
+
+def apply_clahe(imp, block_size, histogram_bins, max_slope, strips=None):
     """Apply CLAHE to an image in place (precise method, no mask).
+
+    strips: None lets the image height and the number of processor cores
+    decide; 1 processes the image in one piece. The pixels are the same
+    either way.
 
     The CLAHE library is called directly with the same parameter mapping as
     the Process > Enhance Local Contrast (CLAHE) dialog. The menu command is
@@ -1176,6 +1252,10 @@ def apply_clahe(imp, block_size, histogram_bins, max_slope):
         flat = None
     imp.deleteRoi()
     if flat is not None:
+        if strips is None:
+            strips = clahe_strip_count(imp.getHeight())
+        if strips > 1 and clahe_in_strips(flat, imp, block_radius, bins, max_slope, int(strips)):
+            return
         flat.getInstance().run(imp, block_radius, bins, float(max_slope), None, False)
         return
     if WindowManager.getIDList() is None:

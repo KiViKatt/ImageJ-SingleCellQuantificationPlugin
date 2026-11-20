@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Ivan Khimach
+# Copyright (C) 2026 Maksym Taran
 
 # Cell Quant Studio Universal - application window
 #
@@ -27,25 +28,42 @@ if APP_VERSION != CORE_VERSION:
         APP_VERSION + ". Re-extract the release so that all files come from one package."
     )
 
-from ij import IJ, WindowManager
+from ij import IJ, WindowManager, Prefs
+from ij.process import ImageProcessor
 from ij.plugin.frame import RoiManager
 from ij.measure import ResultsTable, Measurements
 
 from javax.swing import (
     JFrame, JPanel, JTabbedPane, JScrollPane, JTextArea, JButton, JLabel,
     JFileChooser, JOptionPane, JSplitPane, JTextField, JCheckBox, JComboBox,
-    JProgressBar, BoxLayout, BorderFactory, SwingUtilities
+    JProgressBar, BoxLayout, BorderFactory, SwingUtilities, UIManager, Box
 )
+from javax.swing import Timer as SwingTimer
+from javax.swing import JViewport, SwingConstants, Scrollable, JToggleButton, ButtonGroup, JSeparator, JTextPane
+from javax.swing import JPopupMenu, JMenuItem
+from javax.swing.text import JTextComponent, SimpleAttributeSet, StyleConstants
+from java.awt import LayoutManager, GraphicsEnvironment, CardLayout
+from java.awt.event import MouseAdapter, ComponentAdapter
+from java.awt.font import TextAttribute
+from java.awt.geom import Ellipse2D, Path2D
 from java.awt import (
     BorderLayout, GridBagLayout, GridBagConstraints, Insets, Dimension, Font,
-    Color, FlowLayout, Cursor, Window
+    Color, FlowLayout, Cursor, Window, RenderingHints, GradientPaint, BasicStroke
 )
+from java.awt.event import WindowAdapter, ActionListener
+from java.awt.geom import RoundRectangle2D, Arc2D
+from java.awt.image import BufferedImage
+from ij.process import ImageStatistics, FloatProcessor, ColorProcessor, Blitter
+from java.util import HashMap
+from java.beans import PropertyChangeListener
+from javax.swing.event import DocumentListener, ChangeListener
 from java.awt.dnd import DropTarget, DnDConstants, DropTargetAdapter
 from java.awt.datatransfer import DataFlavor
 from java.io import File
-from java.lang import Runnable
+from java.lang import Runnable, System
 
 import os
+import math
 import time
 import traceback
 import threading
@@ -192,7 +210,7 @@ class FileDropTarget(DropTargetAdapter):
 
 class ChannelSettingsPanel(JPanel):
     def __init__(self, app, channel_number):
-        JPanel.__init__(self, BorderLayout(6, 6))
+        JPanel.__init__(self, BorderLayout(0, 0))
         self.app = app
         self.channel_number = channel_number
 
@@ -254,158 +272,120 @@ class ChannelSettingsPanel(JPanel):
         self.build_panel()
 
     def add_form_row(self, panel, row, label_text, component, extra=None):
-        gbc = GridBagConstraints()
-        gbc.gridx = 0
-        gbc.gridy = row
-        gbc.anchor = GridBagConstraints.WEST
-        gbc.insets = Insets(4, 6, 4, 6)
-        panel.add(JLabel(label_text), gbc)
-
-        gbc = GridBagConstraints()
-        gbc.gridx = 1
-        gbc.gridy = row
-        gbc.weightx = 1.0
-        gbc.fill = GridBagConstraints.HORIZONTAL
-        gbc.insets = Insets(4, 6, 4, 6)
-        panel.add(component, gbc)
-
-        if extra is not None:
-            gbc = GridBagConstraints()
-            gbc.gridx = 2
-            gbc.gridy = row
-            gbc.anchor = GridBagConstraints.WEST
-            gbc.insets = Insets(4, 6, 4, 6)
-            panel.add(extra, gbc)
+        """A form row of this channel (row is kept for older callers; a form
+        numbers its rows itself). extra: a button, or a short hint label."""
+        form_row(panel, self.form_labels, label_text, component, extra)
 
     def build_panel(self):
-        header = JPanel(GridBagLayout())
-        header.setBorder(BorderFactory.createTitledBorder("Channel identity and analysis role"))
+        self.form_labels = form_group()
+        header = Card("Identity and analysis role")
         self.add_form_row(header, 0, "Physical channel", JLabel("C" + str(self.channel_number)))
         self.add_form_row(header, 1, "Use", self.enabled_cb)
         self.add_form_row(header, 2, "Channel name", self.name_field)
         self.add_form_row(header, 3, "Analysis mode", self.analysis_combo)
+        cards = [header, self.build_preprocessing_panel()] + self.build_segmentation_panel() + [self.build_object_panel()]
 
-        tabs = JTabbedPane()
-        tabs.add("Preprocessing", JScrollPane(self.build_preprocessing_panel()))
-        tabs.add("Segmentation", JScrollPane(self.build_segmentation_panel()))
-        tabs.add("Object counting", JScrollPane(self.build_object_panel()))
-
-        actions = JPanel(FlowLayout(FlowLayout.LEFT))
-        actions.setBorder(BorderFactory.createTitledBorder("Channel actions"))
-        actions.add(JButton(
-            "Prepare / refresh",
-            actionPerformed=lambda event, ch=self.channel_number: self.app.preview_prepared_channel(ch)
-        ))
-        actions.add(JButton(
-            "Brightness / Contrast",
-            actionPerformed=lambda event, ch=self.channel_number: self.app.open_brightness_contrast(ch)
-        ))
-        actions.add(JButton(
-            "Capture display minimum",
-            actionPerformed=lambda event, ch=self.channel_number: self.app.capture_display_threshold(ch)
-        ))
-        actions.add(JButton(
-            "Preview mask",
-            actionPerformed=lambda event, ch=self.channel_number: self.app.preview_mask(ch)
-        ))
-
-        self.add(header, BorderLayout.NORTH)
-        self.add(tabs, BorderLayout.CENTER)
-        self.add(actions, BorderLayout.SOUTH)
+        actions = button_row([
+            JButton("Prepare / refresh",
+                    actionPerformed=lambda event, ch=self.channel_number: self.app.preview_prepared_channel(ch)),
+            JButton("Brightness / Contrast",
+                    actionPerformed=lambda event, ch=self.channel_number: self.app.open_brightness_contrast(ch)),
+            JButton("Capture display minimum",
+                    actionPerformed=lambda event, ch=self.channel_number: self.app.capture_display_threshold(ch)),
+            JButton("Preview mask",
+                    actionPerformed=lambda event, ch=self.channel_number: self.app.preview_mask(ch))
+        ])
+        actions.setOpaque(False)
+        bar = JPanel(BorderLayout())
+        bar.setBorder(BorderFactory.createEmptyBorder(12, 12, 2, 12))
+        bar.add(actions, BorderLayout.CENTER)
+        self.add(page_scroll(stack(cards), PAGE_WIDTH, 12), BorderLayout.CENTER)
+        self.add(bar, BorderLayout.SOUTH)
 
     def build_preprocessing_panel(self):
-        panel = JPanel(GridBagLayout())
-        panel.setBorder(BorderFactory.createEmptyBorder(6, 6, 6, 6))
+        panel = Card("Preprocessing")
         self.add_form_row(panel, 0, "Z processing", self.projection_combo)
-        self.add_form_row(panel, 1, "Specific Z slice", self.z_slice_field, JLabel("Used only for Specific Z"))
+        self.add_form_row(panel, 1, "Specific Z slice", self.z_slice_field, form_hint("used only for Specific Z"))
         self.add_form_row(panel, 2, "Background subtraction", self.subtract_bg_cb)
-        self.add_form_row(panel, 3, "Rolling-ball radius", self.bg_radius_field)
+        self.add_form_row(panel, 3, "Rolling-ball radius", self.bg_radius_field, form_hint("pixels"))
         self.add_form_row(panel, 4, "Background polarity", self.light_background_cb)
-        self.add_form_row(panel, 5, "Median radius", self.median_field, JLabel("0 disables"))
-        self.add_form_row(panel, 6, "Gaussian sigma", self.gaussian_field, JLabel("0 disables"))
+        self.add_form_row(panel, 5, "Median radius", self.median_field, form_hint("pixels; 0 disables"))
+        self.add_form_row(panel, 6, "Gaussian sigma", self.gaussian_field, form_hint("pixels; 0 disables"))
         self.add_form_row(panel, 7, "Display LUT", self.lut_combo)
         return panel
 
     def build_segmentation_panel(self):
-        panel = JPanel(GridBagLayout())
-        panel.setBorder(BorderFactory.createEmptyBorder(6, 6, 6, 6))
-        self.add_form_row(panel, 0, "Threshold mode", self.threshold_combo)
-        self.add_form_row(panel, 1, "Automatic method", self.auto_method_combo)
-        self.add_form_row(panel, 2, "Automatic polarity", self.dark_background_cb)
-        self.add_form_row(panel, 3, "Automatic threshold multiplier", self.auto_scale_field)
-        self.add_form_row(panel, 4, "Manual lower threshold", self.manual_low_field)
-        self.add_form_row(panel, 5, "Manual upper threshold", self.manual_high_field, JLabel("-1 = image maximum"))
-        self.add_form_row(panel, 6, "Local threshold radius", self.local_radius_field, JLabel("pixels; Local Phansalkar only"))
-        self.add_form_row(panel, 7, "Phansalkar parameter 1", self.local_parameter_1_field)
-        self.add_form_row(panel, 8, "Phansalkar parameter 2", self.local_parameter_2_field)
-        self.add_form_row(panel, 9, "Segmentation-only CLAHE", self.clahe_cb)
-        self.add_form_row(panel, 10, "CLAHE block size", self.clahe_block_size_field)
-        self.add_form_row(panel, 11, "CLAHE histogram bins", self.clahe_histogram_bins_field)
-        self.add_form_row(panel, 12, "CLAHE maximum slope", self.clahe_max_slope_field)
-        self.add_form_row(panel, 13, "Open iterations", self.open_iterations_field)
-        self.add_form_row(panel, 14, "Close iterations", self.close_iterations_field)
-        self.add_form_row(panel, 15, "Erode iterations", self.erode_iterations_field)
-        self.add_form_row(panel, 16, "Dilate iterations", self.dilate_iterations_field)
-        self.add_form_row(panel, 17, "Binary neighbor count", self.morph_count_field, JLabel("1-8; 1 = ImageJ default"))
-        self.add_form_row(panel, 18, "Hole filling", self.fill_holes_cb)
-        self.add_form_row(panel, 19, "Object separation", self.watershed_cb)
+        """Three cards: the threshold, local thresholding and CLAHE, and the
+        clean-up of the mask."""
+        threshold = Card("Threshold")
+        self.add_form_row(threshold, 0, "Threshold mode", self.threshold_combo)
+        self.add_form_row(threshold, 1, "Automatic method", self.auto_method_combo)
+        self.add_form_row(threshold, 2, "Automatic polarity", self.dark_background_cb)
+        self.add_form_row(threshold, 3, "Automatic threshold multiplier", self.auto_scale_field, form_hint("x the automatic level"))
+        self.add_form_row(threshold, 4, "Manual lower threshold", self.manual_low_field, form_hint("grey value"))
+        self.add_form_row(threshold, 5, "Manual upper threshold", self.manual_high_field, form_hint("grey value; -1 = image maximum"))
+        form_under(threshold, WrapNote(
+            "Display minimum uses the lower Brightness/Contrast display limit without changing pixel values.", 12
+        ), ROW_GAP + 3)
 
-        note = JTextArea(
-            "Display minimum uses the lower Brightness/Contrast display limit without changing pixel values. "
+        local = Card("Local threshold and CLAHE")
+        self.add_form_row(local, 6, "Local threshold radius", self.local_radius_field, form_hint("pixels; Local Phansalkar only"))
+        self.add_form_row(local, 7, "Phansalkar parameter 1", self.local_parameter_1_field)
+        self.add_form_row(local, 8, "Phansalkar parameter 2", self.local_parameter_2_field)
+        self.add_form_row(local, 9, "Segmentation-only CLAHE", self.clahe_cb)
+        self.add_form_row(local, 10, "CLAHE block size", self.clahe_block_size_field, form_hint("pixels"))
+        self.add_form_row(local, 11, "CLAHE histogram bins", self.clahe_histogram_bins_field)
+        self.add_form_row(local, 12, "CLAHE maximum slope", self.clahe_max_slope_field)
+        form_under(local, WrapNote(
             "Local Phansalkar calculates a spatially adaptive threshold and is useful when dim and bright objects coexist. "
-            "CLAHE is applied only to the temporary segmentation copy, never to the prepared image used for intensity measurements. "
+            "CLAHE is applied only to the temporary segmentation copy, never to the prepared image used for intensity measurements.", 12
+        ), ROW_GAP + 3)
+
+        cleanup = Card("Mask cleanup")
+        self.add_form_row(cleanup, 13, "Open iterations", self.open_iterations_field)
+        self.add_form_row(cleanup, 14, "Close iterations", self.close_iterations_field)
+        self.add_form_row(cleanup, 15, "Erode iterations", self.erode_iterations_field)
+        self.add_form_row(cleanup, 16, "Dilate iterations", self.dilate_iterations_field)
+        self.add_form_row(cleanup, 17, "Binary neighbor count", self.morph_count_field, form_hint("1-8; 1 = ImageJ default"))
+        self.add_form_row(cleanup, 18, "Hole filling", self.fill_holes_cb)
+        self.add_form_row(cleanup, 19, "Object separation", self.watershed_cb)
+        form_under(cleanup, WrapNote(
             "Open with N iterations is N erosions followed by N dilations; Close is the reverse. "
             "The iteration counts and the neighbor count set here are used as given and are stored in the profile; "
             "Fiji's Process > Binary > Options do not affect them. "
-            "The raw mask is saved after cleanup but before watershed. The final mask is a separate copy after watershed."
-        )
-        note.setEditable(False)
-        note.setLineWrap(True)
-        note.setWrapStyleWord(True)
-        note.setOpaque(False)
-        gbc = GridBagConstraints()
-        gbc.gridx = 0
-        gbc.gridy = 20
-        gbc.gridwidth = 3
-        gbc.weightx = 1.0
-        gbc.fill = GridBagConstraints.HORIZONTAL
-        gbc.insets = Insets(10, 6, 6, 6)
-        panel.add(note, gbc)
-        return panel
+            "The raw mask is saved after cleanup but before watershed. The final mask is a separate copy after watershed.", 12
+        ), ROW_GAP + 3)
+        return [threshold, local, cleanup]
 
     def build_object_panel(self):
-        panel = JPanel(GridBagLayout())
-        panel.setBorder(BorderFactory.createEmptyBorder(6, 6, 6, 6))
+        panel = Card("Object counting")
+        self.min_size_hint = form_hint("")
+        self.max_size_hint = form_hint("")
         self.add_form_row(panel, 0, "Particle-size units", self.size_units_combo)
-        self.add_form_row(panel, 1, "Minimum object area", self.min_size_field)
-        self.add_form_row(panel, 2, "Maximum object area", self.max_size_field, JLabel("-1 = no maximum"))
-        self.add_form_row(panel, 3, "Minimum circularity", self.min_circularity_field)
-        self.add_form_row(panel, 4, "Maximum circularity", self.max_circularity_field)
+        self.add_form_row(panel, 1, "Minimum object area", self.min_size_field, self.min_size_hint)
+        self.add_form_row(panel, 2, "Maximum object area", self.max_size_field, self.max_size_hint)
+        self.add_form_row(panel, 3, "Minimum circularity", self.min_circularity_field, form_hint("0 to 1"))
+        self.add_form_row(panel, 4, "Maximum circularity", self.max_circularity_field, form_hint("0 to 1"))
         self.add_form_row(panel, 5, "Edge exclusion", self.exclude_edges_cb)
         self.add_form_row(panel, 6, "Hole behavior", self.include_holes_cb)
         self.add_form_row(panel, 7, "ROI topology", self.composite_rois_cb)
         self.add_form_row(panel, 8, "Connectivity", self.four_connected_cb)
         self.add_form_row(panel, 9, "Cross-channel measurement", self.cross_measure_cb)
-
-        note = JTextArea(
+        form_under(panel, WrapNote(
             "Use Objects only or Objects + area to count segmented objects. Objects are detected inside the true outline of each parent ROI; "
             "an object crossing the outline is clipped there. Edge exclusion removes every object with a pixel on the ROI outline or the image border. "
             "Cross-channel measurement is optional. "
-            "Leave it disabled for markers such as MAP2 when nuclear object ROIs are not biologically meaningful."
-        )
-        note.setEditable(False)
-        note.setLineWrap(True)
-        note.setWrapStyleWord(True)
-        note.setOpaque(False)
-        gbc = GridBagConstraints()
-        gbc.gridx = 0
-        gbc.gridy = 10
-        gbc.gridwidth = 3
-        gbc.weightx = 1.0
-        gbc.fill = GridBagConstraints.HORIZONTAL
-        gbc.insets = Insets(10, 6, 6, 6)
-        panel.add(note, gbc)
+            "Leave it disabled for markers such as MAP2 when nuclear object ROIs are not biologically meaningful.", 12
+        ), ROW_GAP + 3)
+        self.size_units_combo.addActionListener(lambda event: self.show_size_units())
+        self.show_size_units()
         return panel
+
+    def show_size_units(self):
+        """The unit of the object-area fields, after the chosen size units."""
+        unit = "pixels" if to_text(self.size_units_combo.getSelectedItem()) == "Pixel^2" else "calibrated unit" + SQUARED
+        self.min_size_hint.setText(unit)
+        self.max_size_hint.setText(unit + "; -1 = no maximum")
 
     def checkbox_widgets(self):
         return {
@@ -508,6 +488,2964 @@ class ChannelSettingsPanel(JPanel):
 
 
 # -----------------------------------------------------------------------------
+# Look of the window, and the Results tab
+# -----------------------------------------------------------------------------
+#
+# Two looks of the window's own, Light and Dark, in the spirit of Apple's
+# interfaces: neutral grays, content on rounded cards, one blue accent for
+# the next step, and the platform's own interface font (Segoe UI on
+# Windows, San Francisco on macOS, else the bundled IBM Plex Sans, under the
+# SIL Open Font License in the fonts folder). Both are built on FlatLaf,
+# which ships with Fiji. A Swing look applies to every window of Fiji, so it
+# is switched on when the window opens and the previous look is put back
+# when the window closes. The third choice, Fiji default, leaves Fiji's own
+# look alone. The choice (Light | Dark | Fiji, top right) is remembered.
+
+LOOK_DARK = "Dark"
+LOOK_LIGHT = "Light"
+LOOK_FIJI = "Fiji default"
+LOOK_NAMES = [LOOK_LIGHT, LOOK_DARK, LOOK_FIJI]
+# What the switch in the title row says for each look.
+LOOK_SHORT_NAMES = {LOOK_LIGHT: "Light", LOOK_DARK: "Dark", LOOK_FIJI: "Fiji"}
+LOOK_PREF_KEY = "cellquant.look"
+LOOK_STATE = {"active": False, "name": None, "previous": None, "extras": None}
+LOOK_FONTS = {"loaded": False}
+LOOK_FONT_FILES = [
+    ("ui", "IBMPlexSans-Regular.ttf"), ("ui_semibold", "IBMPlexSans-Medium.ttf"), ("ui_bold", "IBMPlexSans-SemiBold.ttf"),
+    ("figure", "ChakraPetch-SemiBold.ttf"), ("figure_light", "ChakraPetch-Medium.ttf"), ("title", "ChakraPetch-Bold.ttf")
+]
+LOOK_UI_FAMILY = "IBM Plex Sans"
+# True: the title and the large figures in the bundled display face (Chakra
+# Petch). False: in the interface font, semibold, which is quieter.
+LOOK_USE_DISPLAY_FONT = False
+LOOK_FAMILIES = {"names": None}
+
+
+def look_hex(text):
+    """'#rrggbb' -> java.awt.Color."""
+    value = int(to_text(text)[1:], 16)
+    return Color((value >> 16) & 255, (value >> 8) & 255, value & 255)
+
+
+def look_hex_text(color):
+    """java.awt.Color -> '#rrggbb', for FlatLaf styles."""
+    return "#%02x%02x%02x" % (color.getRed(), color.getGreen(), color.getBlue())
+
+
+# What both looks share: the shapes.
+LOOK_SHAPE_EXTRAS = [
+    ("Component.arc", "10"), ("TextComponent.arc", "10"), ("Button.arc", "10"), ("CheckBox.arc", "4"),
+    ("Component.innerFocusWidth", "0"), ("Button.margin", "6,16,6,16"),
+    ("TabbedPane.tabHeight", "40"), ("TabbedPane.showTabSeparators", "false"),
+    ("TabbedPane.tabSelectionHeight", "2"), ("TabbedPane.contentSeparatorHeight", "1"),
+    ("TabbedPane.tabInsets", "4,14,4,14"),
+    ("ProgressBar.arc", "999"),
+    ("ScrollBar.width", "10"), ("ScrollBar.thumbArc", "999"), ("ScrollBar.thumbInsets", "2,2,2,2"),
+    ("SplitPane.dividerSize", "8"),
+    ("CheckBox.icon.style", "filled")
+]
+# The palettes, one per look, as Apple's system colors. In each:
+#   "dark"      whether FlatLaf's dark or light theme is the base,
+#   "extras"    the colors FlatLaf is given,
+#   "primary"   the colors of the one filled button of a section,
+#   the rest    what the painted parts of the window use: "back" (the page)
+#               and "glow_back" (the middle of the Results tab), "card",
+#               "field", "line" (hairlines), "track" (an empty ring or bar),
+#               "thumb" (the chosen segment) on its "segment_track", "text", "faint", "accent",
+#               "accent_text" (the accent as words; also "link"), "on_accent",
+#               "danger", "fill" with "fill_hover" (filled buttons), "hover",
+#               "stage" (behind a fluorescence picture), "tints" (one per kind
+#               of measurement) with "tint_texts" for words, "rings" (one per
+#               region), "veil" with "veil_text" (what covers the picture
+#               under the pointer).
+# Contrast (WCAG): body text 15:1 or more; secondary text 4.7:1 or more on
+# page and card; the accent as words 4.7:1 or more; white on a filled button
+# 4.7:1 (5.4:1 under the pointer).
+LOOK_PALETTES = {
+    LOOK_DARK: {
+        "dark": True,
+        "back": look_hex("#000000"),
+        "glow_back": look_hex("#000000"),
+        "card": look_hex("#1c1c1e"),
+        "field": look_hex("#2c2c2e"),
+        "line": look_hex("#38383a"),
+        "track": look_hex("#3a3a3c"),
+        "thumb": look_hex("#636366"),
+        "segment_track": look_hex("#2c2c2e"),
+        "text": look_hex("#f5f5f7"),
+        "faint": look_hex("#98989d"),
+        "accent": look_hex("#0a84ff"),
+        "accent_text": look_hex("#409cff"),
+        "link": look_hex("#409cff"),
+        "on_accent": look_hex("#ffffff"),
+        "danger": look_hex("#ff453a"),
+        "warning": look_hex("#ffd60a"),
+        "fill": look_hex("#0071e3"),
+        "fill_hover": look_hex("#0068d1"),
+        "hover": look_hex("#2c2c2e"),
+        "stage": look_hex("#000000"),
+        "tints": {"count": look_hex("#0a84ff"), "density": look_hex("#bf5af2"), "percent": look_hex("#ff9f0a")},
+        "tint_texts": {"count": look_hex("#409cff"), "density": look_hex("#da8fff"), "percent": look_hex("#ffb340")},
+        "rings": [
+            look_hex("#f5f5f7"), look_hex("#d1d1d6"), look_hex("#aeaeb2"),
+            look_hex("#8e8e93"), look_hex("#e5e5ea"), look_hex("#c7c7cc")
+        ],
+        "veil": Color(0, 0, 0, 150),
+        "veil_text": look_hex("#ffffff"),
+        "primary": "background: #0071e3; hoverBackground: #0068d1; pressedBackground: #0058b0; "
+                   "focusedBackground: #0058b0; foreground: #ffffff",
+        "extras": [
+            ("@background", "#000000"), ("@foreground", "#f5f5f7"), ("@accentColor", "#0a84ff"),
+            ("CellQuant.link", "#409cff"), ("CellQuant.danger", "#ff453a"),
+            ("CellQuant.track", "#2c2c2e"), ("CellQuant.thumb", "#636366"),
+            ("Label.disabledForeground", "#98989d"),
+            ("Component.borderColor", "#6e6e73"), ("Component.disabledBorderColor", "#38383a"),
+            ("Component.focusColor", "#0a84ff"), ("Component.focusedBorderColor", "#0a84ff"),
+            ("Button.background", "#2c2c2e"), ("Button.hoverBackground", "#3a3a3c"),
+            ("Button.pressedBackground", "#48484a"), ("Button.borderColor", "#48484a"),
+            ("Button.hoverBorderColor", "#48484a"), ("ToggleButton.background", "#2c2c2e"),
+            ("TextField.background", "#2c2c2e"), ("FormattedTextField.background", "#2c2c2e"),
+            ("TextArea.background", "#2c2c2e"), ("TextPane.background", "#1c1c1e"),
+            ("ComboBox.background", "#2c2c2e"), ("ComboBox.buttonBackground", "#2c2c2e"),
+            ("ComboBox.buttonEditableBackground", "#2c2c2e"), ("ComboBox.popupBackground", "#1c1c1e"),
+            ("CheckBox.icon.borderColor", "#8e8e93"), ("CheckBox.icon.background", "#2c2c2e"),
+            ("CheckBox.icon.selectedBackground", "#0a84ff"), ("CheckBox.icon.selectedBorderColor", "#0a84ff"),
+            ("CheckBox.icon.checkmarkColor", "#ffffff"),
+            ("TabbedPane.underlineColor", "#0a84ff"), ("TabbedPane.inactiveUnderlineColor", "#98989d"),
+            ("TabbedPane.focusColor", "#000000"), ("TabbedPane.hoverColor", "#1c1c1e"),
+            ("ProgressBar.foreground", "#0a84ff"), ("ProgressBar.background", "#3a3a3c"),
+            ("Separator.foreground", "#38383a"),
+            ("ToolTip.background", "#2c2c2e"), ("ToolTip.foreground", "#f5f5f7"),
+            ("TitledBorder.titleColor", "#98989d")
+        ]
+    },
+    LOOK_LIGHT: {
+        "dark": False,
+        "back": look_hex("#f5f5f7"),
+        "glow_back": look_hex("#f5f5f7"),
+        "card": look_hex("#ffffff"),
+        "field": look_hex("#ffffff"),
+        "line": look_hex("#d2d2d7"),
+        "track": look_hex("#e8e8ed"),
+        "thumb": look_hex("#ffffff"),
+        "segment_track": look_hex("#e3e3e8"),
+        "text": look_hex("#1d1d1f"),
+        "faint": look_hex("#6e6e73"),
+        "accent": look_hex("#0071e3"),
+        "accent_text": look_hex("#0066cc"),
+        "link": look_hex("#0066cc"),
+        "on_accent": look_hex("#ffffff"),
+        "danger": look_hex("#d70015"),
+        "warning": look_hex("#b25000"),
+        "fill": look_hex("#0071e3"),
+        "fill_hover": look_hex("#0068d1"),
+        "hover": look_hex("#f0f0f2"),
+        "stage": look_hex("#0c0c0e"),
+        "tints": {"count": look_hex("#0071e3"), "density": look_hex("#8944ab"), "percent": look_hex("#c93400")},
+        "tint_texts": {"count": look_hex("#0066cc"), "density": look_hex("#8944ab"), "percent": look_hex("#c93400")},
+        "rings": [
+            look_hex("#3a3a3c"), look_hex("#5a5a5e"), look_hex("#76767b"),
+            look_hex("#48484a"), look_hex("#636366"), look_hex("#6e6e73")
+        ],
+        "veil": Color(0, 0, 0, 150),
+        "veil_text": look_hex("#ffffff"),
+        "primary": "background: #0071e3; hoverBackground: #0068d1; pressedBackground: #0058b0; "
+                   "focusedBackground: #0058b0; foreground: #ffffff",
+        "extras": [
+            ("@background", "#f5f5f7"), ("@foreground", "#1d1d1f"), ("@accentColor", "#0071e3"),
+            ("CellQuant.link", "#0066cc"), ("CellQuant.danger", "#d70015"),
+            ("CellQuant.track", "#e8e8ed"), ("CellQuant.thumb", "#ffffff"),
+            ("Label.disabledForeground", "#6e6e73"),
+            ("Component.borderColor", "#8e8e93"), ("Component.disabledBorderColor", "#d2d2d7"),
+            ("Component.focusColor", "#0071e3"), ("Component.focusedBorderColor", "#0071e3"),
+            ("Button.background", "#ffffff"), ("Button.hoverBackground", "#f0f0f2"),
+            ("Button.pressedBackground", "#e8e8ed"), ("Button.borderColor", "#c7c7cc"),
+            ("Button.hoverBorderColor", "#aeaeb2"), ("ToggleButton.background", "#ffffff"),
+            ("TextField.background", "#ffffff"), ("FormattedTextField.background", "#ffffff"),
+            ("TextArea.background", "#ffffff"), ("TextPane.background", "#ffffff"),
+            ("ComboBox.background", "#ffffff"), ("ComboBox.buttonBackground", "#ffffff"),
+            ("ComboBox.buttonEditableBackground", "#ffffff"), ("ComboBox.popupBackground", "#ffffff"),
+            ("CheckBox.icon.borderColor", "#8e8e93"), ("CheckBox.icon.background", "#ffffff"),
+            ("CheckBox.icon.selectedBackground", "#0071e3"), ("CheckBox.icon.selectedBorderColor", "#0071e3"),
+            ("CheckBox.icon.checkmarkColor", "#ffffff"),
+            ("TabbedPane.underlineColor", "#0071e3"), ("TabbedPane.inactiveUnderlineColor", "#6e6e73"),
+            ("TabbedPane.focusColor", "#f5f5f7"), ("TabbedPane.hoverColor", "#e8e8ed"),
+            ("ProgressBar.foreground", "#0071e3"), ("ProgressBar.background", "#e8e8ed"),
+            ("Separator.foreground", "#d2d2d7"),
+            ("ToolTip.background", "#ffffff"), ("ToolTip.foreground", "#1d1d1f"),
+            ("TitledBorder.titleColor", "#6e6e73")
+        ]
+    }
+}
+CHANNEL_SWATCHES = {
+    "Blue": Color(0, 113, 227), "Green": Color(36, 138, 61), "Red": Color(215, 0, 21),
+    "Magenta": Color(175, 82, 222), "Cyan": Color(0, 113, 164), "Yellow": Color(201, 52, 0)
+}
+CHANNEL_SERIES = [Color(0, 113, 227), Color(36, 138, 61), Color(201, 52, 0), Color(137, 68, 171)]
+RING_LIMIT = 8
+PILLS_LABEL = "Rings show"
+PICTURE_BADGE = "Enlarge"
+RUN_LABEL = "Analyse"
+RESULTS_TAB_TITLE = "Results"
+RESULTS_PICTURE_SIZE = 900
+CARD_ARC = 12.0
+# The height of a headline figure of the Results tab when the window is low.
+FIGURE_STEP_COMPACT = 72
+# The dot between the parts of a caption, built without a non-ASCII character in the source.
+MIDDLE_DOT = b"\xc2\xb7".decode("utf-8")
+# Styles of the buttons. "primary" takes its colors from the palette of the
+# look in use (style_button); $CellQuant.* names a color of that palette.
+BUTTON_STYLES = {
+    "primary": "borderWidth: 0; margin: 7,20,7,20",
+    "plain": "margin: 6,16,6,16",
+    "quiet": "foreground: $CellQuant.link; margin: 6,0,6,0",
+    "danger": "foreground: $CellQuant.danger; margin: 6,0,6,0"
+}
+SEGMENT_STYLE = (
+    "arc: 8; borderWidth: 0; focusWidth: 0; innerFocusWidth: 2; margin: 3,14,3,14; "
+    "focusedBorderColor: $CellQuant.accent; "
+    "background: $CellQuant.segment_track; hoverBackground: $CellQuant.segment_track; pressedBackground: $CellQuant.thumb; "
+    "selectedBackground: $CellQuant.thumb; selectedForeground: $CellQuant.text; foreground: $CellQuant.text"
+)
+
+
+def look_preference():
+    """The remembered look: Light, Dark or Fiji default; Light when nothing
+    (or something unknown) was remembered."""
+    try:
+        look_value = to_text(Prefs.get(LOOK_PREF_KEY, LOOK_LIGHT))
+    except ANY_ERROR:
+        return LOOK_LIGHT
+    return look_value if look_value in LOOK_NAMES else LOOK_LIGHT
+
+
+def look_fonts_load():
+    """Read the fonts in the fonts folder beside this file, once. A font
+    that is missing is simply not used."""
+    if LOOK_FONTS["loaded"]:
+        return
+    LOOK_FONTS["loaded"] = True
+    folders = []
+    if globals().get("package_dir"):
+        folders.append(os.path.join(to_text(globals().get("package_dir")), "fonts"))
+    try:
+        folders.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "fonts"))
+    except ANY_ERROR:
+        pass
+    for folder in folders:
+        if not os.path.isdir(folder):
+            continue
+        for pair in LOOK_FONT_FILES:
+            path = os.path.join(folder, pair[1])
+            if pair[0] in LOOK_FONTS or not os.path.isfile(path):
+                continue
+            try:
+                font = Font.createFont(Font.TRUETYPE_FONT, File(path))
+                GraphicsEnvironment.getLocalGraphicsEnvironment().registerFont(font)
+                LOOK_FONTS[pair[0]] = font
+            except ANY_ERROR:
+                pass
+
+
+def look_family_names():
+    if LOOK_FAMILIES["names"] is None:
+        try:
+            LOOK_FAMILIES["names"] = set([
+                to_text(family) for family in GraphicsEnvironment.getLocalGraphicsEnvironment().getAvailableFontFamilyNames()
+            ])
+        except ANY_ERROR:
+            LOOK_FAMILIES["names"] = set()
+    return LOOK_FAMILIES["names"]
+
+
+def look_on_mac():
+    try:
+        return "mac" in to_text(System.getProperty("os.name")).lower()
+    except ANY_ERROR:
+        return False
+
+
+def look_ui_family():
+    """The family of the interface text: the platform's own interface font
+    (San Francisco on macOS, Segoe UI on Windows), else the bundled IBM Plex
+    Sans, else None (the look's own default)."""
+    names = look_family_names()
+    if look_on_mac():
+        return "SF Pro Text" if "SF Pro Text" in names else ".AppleSystemUIFont"
+    if "Segoe UI" in names:
+        return "Segoe UI"
+    look_fonts_load()
+    if "ui" in LOOK_FONTS:
+        return LOOK_UI_FAMILY
+    return None
+
+
+def look_font(kind, size):
+    """A font of the look: "ui", "ui_semibold", "ui_bold" for the interface;
+    "figure", "figure_light" and "title" for the large numbers and the
+    name of the application (semibold interface text, or the bundled
+    display face when LOOK_USE_DISPLAY_FONT is on)."""
+    look_fonts_load()
+    if LOOK_USE_DISPLAY_FONT and LOOK_FONTS.get(kind) is not None and kind in ("figure", "figure_light", "title"):
+        return LOOK_FONTS[kind].deriveFont(float(size))
+    weight = "regular"
+    if kind in ("ui_semibold", "title", "figure"):
+        weight = "semibold"
+    elif kind == "ui_bold":
+        weight = "bold"
+    family = look_ui_family()
+    if family == LOOK_UI_FAMILY:
+        font = LOOK_FONTS.get({"regular": "ui", "semibold": "ui_semibold", "bold": "ui_bold"}[weight])
+        if font is not None:
+            return font.deriveFont(float(size))
+    if family == "Segoe UI" and weight == "semibold" and "Segoe UI Semibold" in look_family_names():
+        return Font("Segoe UI Semibold", Font.PLAIN, int(size))
+    if family is None:
+        base = UIManager.getFont("Label.font")
+        if base is None:
+            base = Font("SansSerif", Font.PLAIN, 13)
+        return base.deriveFont(Font.PLAIN if weight == "regular" else Font.BOLD, float(size))
+    return Font(family, Font.PLAIN if weight == "regular" else Font.BOLD, int(size))
+
+
+def look_caps_font(size):
+    """Small capitals with a little air between the letters."""
+    font = look_font("ui_semibold", size)
+    try:
+        spaced = HashMap()
+        spaced.put(TextAttribute.TRACKING, 0.14)
+        return font.deriveFont(spaced)
+    except ANY_ERROR:
+        return font
+
+
+def look_mono_font(size):
+    """The font of the run log and the folder scan."""
+    names = look_family_names()
+    for family in ["SF Mono", "Menlo", "Consolas", "DejaVu Sans Mono"]:
+        if family in names:
+            return Font(family, Font.PLAIN, int(size))
+    return Font("Monospaced", Font.PLAIN, int(size))
+
+
+def look_extras(name):
+    """The FlatLaf settings of a look, as (key, value) pairs: the shapes
+    both looks share, then the colors of this one."""
+    return LOOK_SHAPE_EXTRAS + LOOK_PALETTES[name]["extras"]
+
+
+def look_install(name=LOOK_LIGHT):
+    """Switch Fiji to one of the window's looks, Light or Dark (event
+    thread). True when it is on."""
+    if name not in LOOK_PALETTES:
+        name = LOOK_LIGHT
+    if LOOK_STATE["active"] and LOOK_STATE["name"] == name:
+        return True
+    try:
+        from com.formdev.flatlaf import FlatLaf, FlatDarkLaf, FlatLightLaf
+        look_fonts_load()
+        if not LOOK_STATE["active"]:
+            # The look object itself is kept, to be handed back by look_restore().
+            LOOK_STATE["previous"] = UIManager.getLookAndFeel()
+            LOOK_STATE["extras"] = FlatLaf.getGlobalExtraDefaults()
+        palette = LOOK_PALETTES[name]
+        extras = HashMap()
+        for pair in look_extras(name):
+            extras.put(pair[0], pair[1])
+        family = look_ui_family()
+        if family is not None and not family.startswith("."):
+            extras.put("defaultFont", "13 " + family)
+        FlatLaf.setGlobalExtraDefaults(extras)
+        if palette["dark"]:
+            FlatDarkLaf.setup()
+        else:
+            FlatLightLaf.setup()
+        FlatLaf.updateUI()
+        LOOK_STATE["active"] = True
+        LOOK_STATE["name"] = name
+    except ANY_ERROR as exc:
+        # No FlatLaf in this Fiji: the window keeps Fiji's look.
+        try:
+            IJ.log(APP_NAME + ": the window's own look is not available (" + to_text(exc) + ").")
+        except ANY_ERROR:
+            pass
+        return False
+    return True
+
+
+def look_restore():
+    """Put back the look Fiji had before look_install() (event thread)."""
+    if not LOOK_STATE["active"]:
+        return
+    LOOK_STATE["active"] = False
+    LOOK_STATE["name"] = None
+    try:
+        from com.formdev.flatlaf import FlatLaf
+        FlatLaf.setGlobalExtraDefaults(LOOK_STATE["extras"])
+        if LOOK_STATE["previous"] is not None:
+            UIManager.setLookAndFeel(LOOK_STATE["previous"])
+        FlatLaf.updateUI()
+    except ANY_ERROR:
+        pass
+
+
+def look_color(key, fallback):
+    try:
+        found = UIManager.getColor(key)
+        if found is not None:
+            return found
+    except ANY_ERROR:
+        pass
+    return fallback
+
+
+def look_is_dark():
+    back = look_color("Panel.background", Color.white)
+    return (back.getRed() + back.getGreen() + back.getBlue()) < 384
+
+
+def look_palette():
+    """The colors of the look in use. Under Fiji's own look: the palette
+    that suits it, the dark one or the light one."""
+    if LOOK_STATE["active"] and LOOK_STATE["name"] in LOOK_PALETTES:
+        return LOOK_PALETTES[LOOK_STATE["name"]]
+    return LOOK_PALETTES[LOOK_DARK if look_is_dark() else LOOK_LIGHT]
+
+
+def look_faded(color, alpha):
+    """color, see-through: alpha 0 is nothing, 255 is solid."""
+    return Color(color.getRed(), color.getGreen(), color.getBlue(), max(0, min(255, int(round(alpha)))))
+
+
+def look_mix(first, second, share):
+    """A color between first and second: share 0 is first, 1 is second."""
+    return Color(
+        int(round(first.getRed() + (second.getRed() - first.getRed()) * share)),
+        int(round(first.getGreen() + (second.getGreen() - first.getGreen()) * share)),
+        int(round(first.getBlue() + (second.getBlue() - first.getBlue()) * share))
+    )
+
+
+def look_name():
+    """The palette in use: the window's look, or under Fiji's own look the
+    palette closest to it."""
+    if LOOK_STATE["active"] and LOOK_STATE["name"] in LOOK_PALETTES:
+        return LOOK_STATE["name"]
+    return LOOK_DARK if look_is_dark() else LOOK_LIGHT
+
+
+def pal(key):
+    """A color of the palette in use (look_palette()), as a java.awt.Color."""
+    return look_palette()[key]
+
+
+def pal_series(index, on_picture=False):
+    """The color of region (ring) number index. On a fluorescence picture
+    (always dark): white, which no channel's lookup table uses for meaning."""
+    if on_picture:
+        return Color.white
+    rings = look_palette()["rings"]
+    return rings[index % len(rings)]
+
+
+def pal_alpha(color, alpha):
+    return look_faded(color, alpha)
+
+
+def look_style(template):
+    """A FlatLaf style with every $CellQuant.<key> replaced by that color of
+    the palette in use, so that it works under any FlatLaf look (also Fiji's
+    own) and can be made again when the look changes."""
+    text = to_text(template)
+    if "$CellQuant." not in text:
+        return text
+    palette = look_palette()
+    parts = text.split("$CellQuant.")
+    out = [parts[0]]
+    for part in parts[1:]:
+        end = 0
+        while end < len(part) and (part[end].isalnum() or part[end] == "_"):
+            end += 1
+        key = part[:end]
+        value = palette.get(key)
+        out.append((look_hex_text(value) if isinstance(value, Color) else "$CellQuant." + key) + part[end:])
+    return "".join(out)
+
+
+def set_style(component, template):
+    """Give a component a FlatLaf style that follows the look (look_style);
+    the template is kept on it for restyle_tree()."""
+    try:
+        component.putClientProperty("cellquant.style", template)
+        component.putClientProperty("FlatLaf.style", look_style(template))
+    except ANY_ERROR:
+        pass
+    return component
+
+
+def restyle_tree(container):
+    """After a change of look: make every kept style again, so that the
+    colors are those of the new look."""
+    try:
+        template = container.getClientProperty("cellquant.style")
+        if template is not None:
+            container.putClientProperty("FlatLaf.style", look_style(template))
+        kind = container.getClientProperty("cellquant.kind")
+        if kind is not None and isinstance(container, JButton):
+            style_button(container, to_text(kind))
+    except ANY_ERROR:
+        pass
+    if hasattr(container, "getComponents"):
+        for child in container.getComponents():
+            restyle_tree(child)
+
+
+def look_smooth(graphics):
+    graphics.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
+    graphics.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON)
+    graphics.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR)
+
+
+def style_button(button, kind="plain"):
+    """"primary": the one filled button of the next step, in the colors of
+    the look in use; "plain": a bordered button; "quiet": a borderless
+    button in the link color, for secondary actions; "danger": a quiet
+    button for actions that close or clear things. The kind is kept on the
+    button so that it can be colored again when the look changes. Looks
+    other than FlatLaf ignore this."""
+    try:
+        button.putClientProperty("cellquant.kind", kind)
+        if kind in ("quiet", "danger"):
+            button.putClientProperty("JButton.buttonType", "borderless")
+        style = BUTTON_STYLES.get(kind, BUTTON_STYLES["plain"])
+        if kind == "primary":
+            style = look_palette()["primary"] + "; " + style
+        button.putClientProperty("FlatLaf.style", look_style(style))
+        if kind == "primary":
+            button.setFont(look_font("ui_semibold", 13))
+    except ANY_ERROR:
+        pass
+    return button
+
+
+def fit_text(graphics, text, room):
+    """text as it fits in room pixels: shortened with three dots when it is
+    too long, and empty when not even that fits."""
+    text = to_text(text)
+    metrics = graphics.getFontMetrics()
+    if room <= 0:
+        return u""
+    if metrics.stringWidth(text) > room:
+        while len(text) > 1 and metrics.stringWidth(text + "...") > room:
+            text = text[:-1]
+        text = text + "..."
+        if metrics.stringWidth(text) > room:
+            return u""
+    return text
+
+
+def paint_fitted(graphics, text, left, baseline, room):
+    """Draw text that never runs past room pixels: it is shortened with
+    three dots when it is too long. Returns the width drawn."""
+    text = fit_text(graphics, text, room)
+    if len(text) == 0:
+        return 0
+    graphics.drawString(text, int(left), int(baseline))
+    return graphics.getFontMetrics().stringWidth(text)
+
+
+def channel_swatch(config, position):
+    """Color that stands for a channel in the Results tab: its lookup table,
+    or one of a fixed series when it has none."""
+    if config is not None and config.get("lut") in CHANNEL_SWATCHES:
+        return CHANNEL_SWATCHES[config["lut"]]
+    return CHANNEL_SERIES[position % len(CHANNEL_SERIES)]
+
+
+def format_count(value):
+    """1234567 -> '1,234,567'."""
+    digits = str(int(round(value)))
+    sign = ""
+    if digits.startswith("-"):
+        sign = "-"
+        digits = digits[1:]
+    groups = []
+    while len(digits) > 3:
+        groups.insert(0, digits[-3:])
+        digits = digits[:-3]
+    groups.insert(0, digits)
+    return sign + ",".join(groups)
+
+
+def result_number(row, key):
+    """A table value as a float, or None when it is missing or not a number."""
+    try:
+        number = float(row.get(key, ""))
+    except (TypeError, ValueError):
+        return None
+    if number != number:
+        return None
+    return number
+
+
+# The superscript two of "per mm2", built without a non-ASCII character in the source.
+SQUARED = b"\xc2\xb2".decode("utf-8")
+METRIC_ORDER = {"count": 0, "density": 1, "percent": 2}
+# The unit of each kind of value, as the Results tab writes it beside a choice.
+METRIC_WORDS = {"count": "count", "density": "per mm" + SQUARED, "percent": "% of area"}
+
+
+def format_metric(value, unit):
+    """A value of the Results tab as text: a count, a density per square
+    millimeter, or a percentage."""
+    if value is None:
+        return "-"
+    if unit == "percent":
+        return "%.1f%%" % value
+    if unit == "density":
+        return format_count(value) + " /mm" + SQUARED
+    return format_count(value)
+
+
+def area_unit_words(unit):
+    """'micron^2' -> the micro sign, 'm' and a superscript two."""
+    unit = to_text(unit or "")
+    if unit.endswith("^2"):
+        return unit_words(unit[:-2]) + SQUARED
+    return unit
+
+
+def results_from_summary(headers, rows, configs):
+    """What the Results tab shows, worked out from the ROI summary table.
+
+    Returns a dictionary:
+      "tiles"    the headline figures: {"title", "value", "kind" ("count" or
+                 "percent"), "note", "color"}. Counts are added up over the
+                 regions; a positive-area fraction is the positive area of
+                 all regions divided by their area.
+      "metrics"  what the rings can show, one value per region each:
+                 {"name", "short", "unit" ("count", "density" or "percent"),
+                 "color", "values"}; object counts first, then object
+                 densities per square millimeter, then positive-area shares.
+      "labels"   the name of every region (summary row).
+      "areas"    the area of every region as text, with its unit.
+      "bars"     the first metric in the older shape {"labels", "series",
+                 "unit"}, or None.
+      "regions"  the number of summary rows."""
+    by_channel = {}
+    for config in configs or []:
+        by_channel[config["channel"]] = config
+    tiles = []
+    metrics = []
+    position = 0
+    for header in headers:
+        kind = None
+        if header.endswith("_Object_Count") and not header.endswith("_Edge_Touching_Object_Count") \
+                and not header.endswith("_Excluded_Edge_Object_Count"):
+            kind = "count"
+            prefix = header[:-len("_Object_Count")]
+        elif header.endswith("_Positive_Area_Fraction_Percent"):
+            kind = "percent"
+            prefix = header[:-len("_Positive_Area_Fraction_Percent")]
+        if kind is None:
+            continue
+        config = None
+        name = prefix
+        if prefix.startswith("C") and "_" in prefix:
+            try:
+                config = by_channel.get(int(prefix[1:prefix.index("_")]))
+            except ValueError:
+                config = None
+            name = prefix[prefix.index("_") + 1:].replace("_", " ")
+        if config is not None:
+            name = config["name"]
+        color = channel_swatch(config, position)
+        position += 1
+        per_region = []
+        for row in rows:
+            per_region.append(result_number(row, header))
+        present = [number for number in per_region if number is not None]
+        if len(present) == 0:
+            continue
+        if kind == "count":
+            note = "counted in " + str(len(present)) + (" region" if len(present) == 1 else " regions")
+            densities = [result_number(row, prefix + "_Object_Density_Per_mm2") for row in rows]
+            # The area of each region in square millimeters follows from its
+            # count and its density; the overall density is all objects over
+            # all of that area.
+            area_mm2 = 0.0
+            complete = len(rows) > 0
+            for index in range(len(rows)):
+                if per_region[index] is None or densities[index] is None:
+                    complete = False
+                elif per_region[index] > 0 and densities[index] > 0:
+                    area_mm2 += per_region[index] / densities[index]
+                elif per_region[index] > 0:
+                    complete = False
+            extra = ""
+            if complete and area_mm2 > 0:
+                extra = format_metric(sum(present) / area_mm2, "density") + " overall"
+            tiles.append({
+                "title": name + " objects", "value": sum(present), "kind": "count", "color": color,
+                "note": note, "extra": extra
+            })
+            metrics.append({"name": name + " objects", "short": name, "unit": "count", "color": color, "values": per_region})
+            if len([number for number in densities if number is not None]) > 0:
+                metrics.append({
+                    "name": name + " density", "short": name, "unit": "density", "color": color, "values": densities
+                })
+        else:
+            positive = 0.0
+            area = 0.0
+            for row in rows:
+                part = result_number(row, prefix + "_Positive_Area")
+                whole = result_number(row, "ROI_Area")
+                if part is not None and whole is not None and whole > 0:
+                    positive += part
+                    area += whole
+            value = positive / area * 100.0 if area > 0 else sum(present) / float(len(present))
+            tiles.append({
+                "title": name + " positive area", "value": value, "kind": "percent", "color": color,
+                "note": "of the measured area"
+            })
+            metrics.append({"name": name + " positive area", "short": name, "unit": "percent", "color": color, "values": per_region})
+    # Counts first: they are what a viewer looks for.
+    counted = [tile["title"][:-len(" objects")] for tile in tiles if tile["kind"] == "count"]
+    shares = [tile for tile in tiles if tile["kind"] != "count"]
+    tiles = [tile for tile in tiles if tile["kind"] == "count"] + \
+        [tile for tile in shares if tile["title"][:-len(" positive area")] not in counted] + \
+        [tile for tile in shares if tile["title"][:-len(" positive area")] in counted]
+    metrics = sorted(metrics, key=lambda metric: METRIC_ORDER[metric["unit"]])
+    labels = []
+    areas = []
+    several_frames = len(set([to_text(other.get("Frame", "")) for other in rows])) > 1
+    for row in rows:
+        label = to_text(row.get("Parent_ROI_Name", ""))
+        if several_frames:
+            label = label + " (frame " + to_text(row.get("Frame", "")) + ")"
+        labels.append(label)
+        size = result_number(row, "ROI_Area")
+        areas.append("" if size is None else format_count(size) + " " + area_unit_words(row.get("ROI_Area_Unit", "")))
+    bars = None
+    if len(metrics) > 0 and len(rows) > 0:
+        first = metrics[0]
+        bars = {
+            "labels": labels, "unit": first["unit"],
+            "series": [{"name": first["short"], "color": first["color"], "values": first["values"]}]
+        }
+    return {"tiles": tiles, "bars": bars, "regions": len(rows), "metrics": metrics, "labels": labels, "areas": areas}
+
+
+def default_ring_metric(data):
+    """What the rings show first: the first object density when there is
+    one (regions of different size are compared fairly), else the first
+    choice."""
+    found = data.get("metrics", []) if data is not None else []
+    for index in range(len(found)):
+        if found[index]["unit"] == "density":
+            return index
+    return 0
+
+
+def results_pictures(run_dir, configs=None):
+    """The picture of a run for the Results tab, as a list holding at most
+    one (caption, java.awt.Image, parents) entry: all channels merged in
+    color with the detected objects outlined. parents are the parent ROIs
+    as (name, x points, y points) in picture coordinates. Never raises."""
+    merged = results_merge_picture(run_dir, configs)
+    if merged is None:
+        return []
+    return [merged]
+
+
+MERGE_COLORS = {
+    "Blue": (70, 120, 255), "Green": (40, 255, 110), "Red": (255, 60, 60), "Magenta": (255, 60, 255),
+    "Cyan": (40, 230, 255), "Yellow": (255, 225, 40), "Grays": (255, 255, 255), "Original": (255, 255, 255)
+}
+MERGE_SERIES = [(70, 120, 255), (40, 255, 110), (255, 60, 60), (255, 60, 255)]
+RESULTS_MAX_OUTLINES = 40000
+
+
+def picture_small_size(width, height, longest):
+    factor = min(1.0, longest / float(max(width, height)))
+    return (max(1, int(round(width * factor))), max(1, int(round(height * factor))), factor)
+
+
+def picture_scale(imp, factor):
+    """(length per pixel of the small picture, unit) of a calibrated image,
+    or None when it is not calibrated."""
+    try:
+        cal = imp.getCalibration()
+        unit = to_text(cal.getUnit() or "")
+        if cal.pixelWidth <= 0 or unit in ("", "pixel", "pixels"):
+            return None
+        return (cal.pixelWidth / float(factor), unit)
+    except ANY_ERROR:
+        return None
+
+
+def scale_bar_length(per_screen_pixel, width):
+    """A round length (1, 2 or 5 times a power of ten) whose bar is about
+    10 to 20 percent of a picture shown width pixels wide, at
+    per_screen_pixel units per pixel of the screen."""
+    wanted = width * 0.15 * per_screen_pixel
+    best = None
+    power = 1e-3
+    while power < 1e7:
+        for step in [1.0, 2.0, 5.0]:
+            length = step * power
+            if best is None or abs(math.log(length / wanted)) < abs(math.log(best / wanted)):
+                best = length
+        power *= 10.0
+    return best
+
+
+def unit_words(unit):
+    """A unit as a scale bar says it: micrometers as "um" with the micro sign."""
+    if is_micrometer_unit(unit):
+        return b"\xc2\xb5".decode("utf-8") + "m"
+    return to_text(unit)
+
+
+def picture_unit_range(processor):
+    """A float copy of an image plane scaled so that its minimum is 0 and its
+    99.8th percentile is 1 (brighter pixels stay above 1 and are clipped later)."""
+    plane = processor.convertToFloat()
+    stats = ImageStatistics.getStatistics(plane, Measurements.MIN_MAX, None)
+    high = stats.max
+    if stats.max > stats.min:
+        wanted = 0.998 * stats.pixelCount
+        seen = 0
+        counts = stats.getHistogram()
+        for index in range(len(counts)):
+            seen += int(counts[index])
+            if seen >= wanted:
+                high = stats.histMin + (index + 1) * stats.binSize
+                break
+    span = high - stats.min
+    if span <= 0:
+        span = 1.0
+    plane.subtract(stats.min)
+    plane.multiply(1.0 / span)
+    return plane
+
+
+def results_merge_picture(run_dir, configs):
+    """All prepared channels of a run in one color picture, each in the color
+    of its lookup table, with the parent ROIs and the detected objects
+    outlined. Returns (caption, java.awt.Image) or None. Never raises, and
+    reads only files the run has written."""
+    try:
+        run_dir = to_text(run_dir)
+        folder = os.path.join(run_dir, "Prepared")
+        if not os.path.isdir(folder):
+            return None
+        by_channel = {}
+        for config in configs or []:
+            by_channel[config["channel"]] = config
+        sums = None
+        size = None
+        full = None
+        used = 0
+        parent_outlines = []
+        # Which channel is which color in the picture, and its pixel size.
+        legend = []
+        scale = None
+        for name in sorted(os.listdir(folder)):
+            text = to_text(name)
+            if not text.endswith("_PREP.tif"):
+                continue
+            channel = None
+            for number in range(1, MAX_CHANNELS + 1):
+                if ("_C" + str(number) + "_") in text:
+                    channel = number
+            imp = IJ.openImage(os.path.join(folder, text))
+            if imp is None:
+                continue
+            try:
+                processor = imp.getProcessor()
+                if processor.getBitDepth() == 24:
+                    continue
+                if size is None:
+                    full = (processor.getWidth(), processor.getHeight())
+                    size = picture_small_size(full[0], full[1], RESULTS_PICTURE_SIZE)
+                    sums = [FloatProcessor(size[0], size[1]) for part in range(3)]
+                elif (processor.getWidth(), processor.getHeight()) != full:
+                    continue
+                if (size[0], size[1]) != full:
+                    processor.setInterpolationMethod(ImageProcessor.BILINEAR)
+                    processor = processor.resize(size[0], size[1], True)
+                plane = picture_unit_range(processor)
+                config = by_channel.get(channel)
+                color = MERGE_SERIES[used % len(MERGE_SERIES)]
+                if config is not None and config.get("lut") in MERGE_COLORS:
+                    color = MERGE_COLORS[config["lut"]]
+                legend.append(((config or {}).get("name") or ("C" + str(channel))) + " " +
+                              color_word(Color(color[0], color[1], color[2])))
+                if scale is None:
+                    scale = picture_scale(imp, size[2])
+                for part in range(3):
+                    if color[part] > 0:
+                        tinted = plane.duplicate()
+                        tinted.multiply(float(color[part]))
+                        sums[part].copyBits(tinted, 0, 0, Blitter.ADD)
+                used += 1
+            finally:
+                safe_close_image(imp)
+        if used == 0:
+            return None
+        parts = []
+        for part in range(3):
+            sums[part].setMinAndMax(0.0, 255.0)
+            parts.append(sums[part].convertToByte(True).getPixels())
+        merged = ColorProcessor(size[0], size[1])
+        merged.setRGB(parts[0], parts[1], parts[2])
+        image = merged.getBufferedImage()
+        graphics = image.createGraphics()
+        try:
+            look_smooth(graphics)
+            factor = size[2]
+            roi_folder = os.path.join(run_dir, "ROIs")
+            drawn = 0
+            if os.path.isdir(roi_folder):
+                graphics.setStroke(BasicStroke(1.0))
+                graphics.setColor(Color(255, 255, 255, 200))
+                for name in sorted(os.listdir(roi_folder)):
+                    if not to_text(name).endswith("_Objects.zip") or drawn >= RESULTS_MAX_OUTLINES:
+                        continue
+                    for roi in load_rois_from_file(os.path.join(roi_folder, name)):
+                        if drawn >= RESULTS_MAX_OUTLINES:
+                            break
+                        outline = roi.getPolygon()
+                        graphics.drawPolygon(
+                            [int(round(value * factor)) for value in outline.xpoints[:outline.npoints]],
+                            [int(round(value * factor)) for value in outline.ypoints[:outline.npoints]],
+                            outline.npoints
+                        )
+                        drawn += 1
+                parents = os.path.join(roi_folder, "Parent_ROIs_Input.zip")
+                if os.path.isfile(parents):
+                    for roi in load_rois_from_file(parents):
+                        outline = roi.getPolygon()
+                        parent_outlines.append((
+                            roi_name(roi, ""),
+                            [value * factor for value in outline.xpoints[:outline.npoints]],
+                            [value * factor for value in outline.ypoints[:outline.npoints]]
+                        ))
+        finally:
+            graphics.dispose()
+        caption = "All channels" + (": " + ", ".join(legend) if len(legend) > 0 else "") + \
+            (" - " + format_count(drawn) + " detected objects outlined" if drawn > 0 else "")
+        return (caption, image, parent_outlines, scale)
+    except ANY_ERROR:
+        return None
+
+
+# -----------------------------------------------------------------------------
+# The channels of the source image, as its file describes them
+# -----------------------------------------------------------------------------
+#
+# The Session tab lists every channel of the source image with the color it
+# is shown in, its excitation and emission wavelengths and its name when the
+# file's metadata gives them (read once, through Bio-Formats' OME metadata,
+# off the event thread), and beside it what this window will do with that
+# channel. A channel called DAPI (or Hoechst) whose wavelength does not fit
+# DAPI is pointed out: a profile that names the wrong channel DAPI counts
+# the wrong cells. Nothing here measures or changes anything.
+
+# DAPI and Hoechst are excited at about 350-420 nm and emit at about 420-500 nm.
+NUCLEAR_STAIN_WORDS = ["dapi", "hoechst"]
+NUCLEAR_EXCITATION = (350.0, 420.0)
+NUCLEAR_EMISSION = (420.0, 500.0)
+CHANNEL_INFO_CACHE = {}
+
+
+def is_nuclear_stain_name(name):
+    text = to_text(name or "").lower()
+    for word in NUCLEAR_STAIN_WORDS:
+        if word in text:
+            return True
+    return False
+
+
+def color_word(color):
+    """A plain name for a display color: red, orange, yellow, green, cyan,
+    blue, violet, magenta, or gray."""
+    if color is None:
+        return ""
+    red = color.getRed() / 255.0
+    green = color.getGreen() / 255.0
+    blue = color.getBlue() / 255.0
+    high = max(red, green, blue)
+    low = min(red, green, blue)
+    if high - low < 0.15:
+        return "gray"
+    if high == red:
+        hue = (60.0 * ((green - blue) / (high - low))) % 360.0
+    elif high == green:
+        hue = 60.0 * ((blue - red) / (high - low)) + 120.0
+    else:
+        hue = 60.0 * ((red - green) / (high - low)) + 240.0
+    for limit, word in [(15, "red"), (45, "orange"), (70, "yellow"), (165, "green"), (195, "cyan"),
+                        (255, "blue"), (285, "violet"), (335, "magenta"), (361, "red")]:
+        if hue < limit:
+            return word
+    return "red"
+
+
+def wavelength_color(info):
+    """The color a channel is usually shown in, from its wavelengths
+    (emission when known, else excitation), or None."""
+    emission = info.get("emission")
+    excitation = info.get("excitation")
+    if emission is not None:
+        bands = [(490, Color(70, 120, 255)), (560, Color(40, 220, 90)), (590, Color(255, 200, 40)),
+                 (645, Color(255, 60, 60)), (10000, Color(230, 60, 230))]
+        value = emission
+    elif excitation is not None:
+        bands = [(430, Color(70, 120, 255)), (505, Color(40, 220, 90)), (535, Color(255, 200, 40)),
+                 (600, Color(255, 60, 60)), (10000, Color(230, 60, 230))]
+        value = excitation
+    else:
+        return None
+    for limit, color in bands:
+        if value < limit:
+            return color
+    return None
+
+
+def lut_color(imp, channel):
+    """The color of the lookup table of a channel of an open image (its
+    brightest entry), or None."""
+    try:
+        if imp.isComposite():
+            lut = imp.getChannelLut(channel)
+        else:
+            lut = imp.getProcessor().getLut()
+        if lut is None:
+            return None
+        value = lut.getRGB(255)
+        return Color((value >> 16) & 255, (value >> 8) & 255, value & 255)
+    except ANY_ERROR:
+        return None
+
+
+def image_channel_basics(imp):
+    """What the open image itself says about its channels: one entry per
+    channel with "channel" (1-based) and "lut" (its display color)."""
+    found = []
+    if imp is None:
+        return found
+    for channel in range(1, min(imp.getNChannels(), MAX_CHANNELS) + 1):
+        found.append({"channel": channel, "lut": lut_color(imp, channel), "name": "", "excitation": None,
+                      "emission": None, "color": None, "fluor": ""})
+    return found
+
+
+def ome_nanometers(length):
+    """An OME Length in nanometers, or None."""
+    if length is None:
+        return None
+    try:
+        from ome.units import UNITS
+        value = length.value(UNITS.NANOMETER)
+        if value is None:
+            return None
+        # Jython hands a java.lang.Double back as a float; other numbers stay Java.
+        try:
+            value = float(value)
+        except (TypeError, ValueError):
+            value = float(value.doubleValue())
+        return value if value > 0 else None
+    except ANY_ERROR:
+        return None
+
+
+def ome_series_for(metadata, channels, title):
+    """The series of a file that the open image most likely is: the one
+    whose name is in the image title, else the first with as many channels."""
+    title = to_text(title or "")
+    fitting = []
+    for series in range(metadata.getImageCount()):
+        try:
+            if int(metadata.getPixelsSizeC(series).getValue()) == channels:
+                fitting.append(series)
+        except ANY_ERROR:
+            pass
+    if len(fitting) == 0:
+        return None
+    for series in fitting:
+        try:
+            name = to_text(metadata.getImageName(series) or "").strip()
+        except ANY_ERROR:
+            name = ""
+        if name != "" and name in title:
+            return series
+    return fitting[0]
+
+
+def ome_channel_entry(metadata, series, channel):
+    """Name, wavelengths, display color and fluorophore of one channel of a
+    series (channel counts from 0), each None or "" when not given."""
+    entry = {"channel": channel + 1, "name": "", "excitation": None, "emission": None, "color": None, "fluor": ""}
+    for key, getter in [("name", "getChannelName"), ("fluor", "getChannelFluor")]:
+        try:
+            value = getattr(metadata, getter)(series, channel)
+            entry[key] = to_text(value).strip() if value is not None else ""
+        except ANY_ERROR:
+            pass
+    try:
+        entry["excitation"] = ome_nanometers(metadata.getChannelExcitationWavelength(series, channel))
+    except ANY_ERROR:
+        pass
+    try:
+        entry["emission"] = ome_nanometers(metadata.getChannelEmissionWavelength(series, channel))
+    except ANY_ERROR:
+        pass
+    try:
+        shade = metadata.getChannelColor(series, channel)
+        if shade is not None:
+            entry["color"] = Color(shade.getRed(), shade.getGreen(), shade.getBlue())
+    except ANY_ERROR:
+        pass
+    return entry
+
+
+def read_channel_metadata(path, channels, title=""):
+    """The channels of an image file as its OME metadata (Bio-Formats)
+    describes them: a list of entries (see ome_channel_entry), or None when
+    the file cannot be read or holds no series with that many channels.
+    Reads metadata only, never pixels, and always closes the file. Takes a
+    second or two for a large file: call it off the event thread."""
+    path = to_text(path or "")
+    if path == "" or not os.path.isfile(path):
+        return None
+    try:
+        key = (path, os.path.getmtime(path), int(channels), to_text(title))
+    except ANY_ERROR:
+        return None
+    if key in CHANNEL_INFO_CACHE:
+        return CHANNEL_INFO_CACHE[key]
+    found = None
+    log_state = None
+    reader = None
+    try:
+        from loci.formats import ImageReader, MetadataTools
+        try:
+            log_state = quiet_bioformats_log()
+        except ANY_ERROR:
+            log_state = None
+        reader = ImageReader()
+        metadata = MetadataTools.createOMEXMLMetadata()
+        reader.setMetadataStore(metadata)
+        reader.setId(path)
+        series = ome_series_for(metadata, int(channels), title)
+        if series is not None:
+            count = min(int(channels), metadata.getChannelCount(series), MAX_CHANNELS)
+            found = [ome_channel_entry(metadata, series, channel) for channel in range(count)]
+    except ANY_ERROR:
+        found = None
+    finally:
+        if reader is not None:
+            try:
+                reader.close()
+            except ANY_ERROR:
+                pass
+        if log_state is not None:
+            try:
+                restore_bioformats_log(log_state)
+            except ANY_ERROR:
+                pass
+    CHANNEL_INFO_CACHE[key] = found
+    return found
+
+
+def merge_channel_info(basics, from_file):
+    """The entries of the open image completed with what the file says."""
+    merged = []
+    for entry in basics:
+        both = dict(entry)
+        if from_file is not None and entry["channel"] - 1 < len(from_file):
+            other = from_file[entry["channel"] - 1]
+            for key in ["name", "excitation", "emission", "color", "fluor"]:
+                if other.get(key) not in (None, ""):
+                    both[key] = other[key]
+            both["from_file"] = True
+        merged.append(both)
+    return merged
+
+
+def channel_display_color(info):
+    """The color of the dot of a channel: the file's own display color, else
+    the color of its lookup table when that is not gray, else the usual
+    color of its wavelength, else gray."""
+    if info.get("color") is not None:
+        return info["color"]
+    lut = info.get("lut")
+    if lut is not None and color_word(lut) != "gray":
+        return lut
+    guessed = wavelength_color(info)
+    if guessed is not None:
+        return guessed
+    return lut if lut is not None else Color(142, 142, 147)
+
+
+def format_nanometers(value):
+    return ("%d" % int(round(value))) + " nm"
+
+
+def channel_file_text(info):
+    """What the file says about a channel, in a few words: its name, its
+    wavelengths and its color. Example: "DAPI - ex 405 / em 461 nm - blue"."""
+    parts = []
+    name = to_text(info.get("name") or "")
+    fluor = to_text(info.get("fluor") or "")
+    if name != "":
+        parts.append(name)
+    if fluor != "" and fluor.lower() != name.lower():
+        parts.append(fluor)
+    excitation = info.get("excitation")
+    emission = info.get("emission")
+    if excitation is not None and emission is not None:
+        parts.append("ex %d / em %d nm" % (int(round(excitation)), int(round(emission))))
+    elif excitation is not None:
+        parts.append(format_nanometers(excitation))
+    elif emission is not None:
+        parts.append("em " + format_nanometers(emission))
+    word = color_word(channel_display_color(info))
+    if word != "":
+        parts.append(word)
+    if excitation is None and emission is None and name == "":
+        if info.get("from_file"):
+            parts.append("no wavelength in the file")
+        else:
+            return (word + " display color; " if word != "" else "") + "no file metadata"
+    return " - ".join(parts)
+
+
+def channel_in_nuclear_band(info):
+    """True when the wavelengths of a channel fit DAPI or Hoechst, False when
+    they do not, None when the file gives none (then the file's channel
+    name decides, when it names a nuclear stain)."""
+    excitation = info.get("excitation")
+    if excitation is not None:
+        return NUCLEAR_EXCITATION[0] <= excitation <= NUCLEAR_EXCITATION[1]
+    emission = info.get("emission")
+    if emission is not None:
+        return NUCLEAR_EMISSION[0] <= emission <= NUCLEAR_EMISSION[1]
+    if is_nuclear_stain_name(info.get("name")) or is_nuclear_stain_name(info.get("fluor")):
+        return True
+    return None
+
+
+def channel_wavelength_text(info):
+    if info.get("excitation") is not None:
+        return "excited at " + format_nanometers(info["excitation"])
+    if info.get("emission") is not None:
+        return "emitting at " + format_nanometers(info["emission"])
+    return "named " + to_text(info.get("name") or info.get("fluor") or "")
+
+
+def channel_name_warnings(infos, configs):
+    """Plain sentences about channel names that contradict the file: a
+    channel called DAPI or Hoechst here whose wavelength does not fit, and
+    a channel whose wavelength fits DAPI while another channel is called
+    DAPI. infos: entries of the source channels; configs: channel number ->
+    {"name", "enabled"}. Only enabled channels count as "called" something."""
+    warnings = []
+    by_channel = {}
+    for info in infos:
+        by_channel[info["channel"]] = info
+    called = [number for number in sorted(configs) if number in by_channel and configs[number].get("enabled")
+              and is_nuclear_stain_name(configs[number].get("name"))]
+    for number in called:
+        band = channel_in_nuclear_band(by_channel[number])
+        if band is False:
+            warnings.append(
+                "C%d is called %s here, but the file says it is %s; DAPI and Hoechst are excited at about 350-420 nm."
+                % (number, to_text(configs[number]["name"]), channel_wavelength_text(by_channel[number]))
+            )
+    for info in infos:
+        number = info["channel"]
+        if channel_in_nuclear_band(info) is not True or number in called:
+            continue
+        others = [other for other in called if channel_in_nuclear_band(by_channel[other]) is not True]
+        if len(others) > 0:
+            warnings.append(
+                "C%d is %s, where DAPI is usually seen, but C%d is called %s. Check the channel names."
+                % (number, channel_wavelength_text(info), others[0], to_text(configs[others[0]]["name"]))
+            )
+    return warnings
+
+
+class ColorDot(JPanel):
+    """A small round swatch of a channel's color."""
+
+    def __init__(self, color):
+        JPanel.__init__(self)
+        self.color = color
+        self.setOpaque(False)
+        self.setPreferredSize(Dimension(12, 12))
+        self.setMinimumSize(Dimension(12, 12))
+
+    def paintComponent(self, graphics):
+        pen = graphics.create()
+        try:
+            look_smooth(pen)
+            pen.setColor(self.color if self.color is not None else pal("faint"))
+            size = min(self.getWidth(), self.getHeight(), 12)
+            pen.fill(Ellipse2D.Float(0.0, (self.getHeight() - size) / 2.0, float(size), float(size)))
+            pen.setColor(look_faded(pal("text"), 60))
+            pen.draw(Ellipse2D.Float(0.5, (self.getHeight() - size) / 2.0 + 0.5, float(size) - 1.0, float(size) - 1.0))
+        finally:
+            pen.dispose()
+
+
+PREVIEW_PICTURE_SIZE = 600
+
+
+def preview_merge(imp, longest):
+    """The channels of an open image at its current Z and frame, made small,
+    each scaled from its minimum to its 99.8th percentile and tinted with
+    the color of its lookup table, added up: a java.awt.Image, or None for
+    an RGB image or when it cannot be made. Reads only; never raises."""
+    try:
+        if imp.getBitDepth() == 24:
+            return None
+        size = picture_small_size(imp.getWidth(), imp.getHeight(), longest)
+        sums = [FloatProcessor(size[0], size[1]) for part in range(3)]
+        stack = imp.getStack()
+        channels = min(imp.getNChannels(), MAX_CHANNELS)
+        for channel in range(1, channels + 1):
+            processor = stack.getProcessor(imp.getStackIndex(channel, imp.getZ(), imp.getT()))
+            if (size[0], size[1]) != (processor.getWidth(), processor.getHeight()):
+                processor.setInterpolationMethod(ImageProcessor.BILINEAR)
+                processor = processor.resize(size[0], size[1], True)
+            plane = picture_unit_range(processor)
+            color = lut_color(imp, channel) if channels > 1 else Color.white
+            if color is None or color_word(color) == "gray":
+                color = Color.white if channels == 1 else Color(*MERGE_SERIES[(channel - 1) % len(MERGE_SERIES)])
+            for part, amount in [(0, color.getRed()), (1, color.getGreen()), (2, color.getBlue())]:
+                if amount > 0:
+                    tinted = plane.duplicate()
+                    tinted.multiply(float(amount))
+                    sums[part].copyBits(tinted, 0, 0, Blitter.ADD)
+        parts = []
+        for part in range(3):
+            sums[part].setMinAndMax(0.0, 255.0)
+            parts.append(sums[part].convertToByte(True).getPixels())
+        merged = ColorProcessor(size[0], size[1])
+        merged.setRGB(parts[0], parts[1], parts[2])
+        return merged.getBufferedImage()
+    except ANY_ERROR:
+        return None
+
+
+class PreviewPanel(JPanel):
+    """The picture of the source image on the Session tab, on a dark stage
+    as in a microscope viewer."""
+
+    def __init__(self):
+        JPanel.__init__(self)
+        self.picture = None
+        self.setOpaque(False)
+        self.setPreferredSize(Dimension(420, 260))
+
+    def show_image(self, imp):
+        """Event thread: a small picture of the image: its channels at the
+        current Z and frame, each scaled to its own range and shown in the
+        color of its lookup table (a dim 16-bit image is not black here);
+        an RGB image as it is."""
+        self.picture = None
+        try:
+            if imp is not None:
+                self.picture = preview_merge(imp, PREVIEW_PICTURE_SIZE)
+                if self.picture is None:
+                    shown = imp.getImage()
+                    size = picture_small_size(imp.getWidth(), imp.getHeight(), PREVIEW_PICTURE_SIZE)
+                    small = BufferedImage(size[0], size[1], BufferedImage.TYPE_INT_RGB)
+                    graphics = small.createGraphics()
+                    try:
+                        look_smooth(graphics)
+                        graphics.drawImage(shown, 0, 0, size[0], size[1], None)
+                    finally:
+                        graphics.dispose()
+                    self.picture = small
+        except ANY_ERROR:
+            self.picture = None
+        self.repaint()
+
+    def paintComponent(self, graphics):
+        pen = graphics.create()
+        try:
+            look_smooth(pen)
+            width = self.getWidth()
+            height = self.getHeight()
+            stage = RoundRectangle2D.Float(0.0, 0.0, float(width), float(height), CARD_ARC, CARD_ARC)
+            pen.setColor(pal("stage"))
+            pen.fill(stage)
+            pen.clip(stage)
+            if self.picture is None:
+                pen.setColor(Color(152, 152, 157))
+                pen.setFont(look_font("ui", 13))
+                words = "The image appears here"
+                paint_fitted(pen, words, (width - pen.getFontMetrics().stringWidth(words)) // 2, height // 2, width - 24)
+                return
+            room_width = width - 24
+            room_height = height - 24
+            if room_width < 10 or room_height < 10:
+                return
+            scale = min(room_width / float(self.picture.getWidth()), room_height / float(self.picture.getHeight()))
+            shown_width = int(self.picture.getWidth() * scale)
+            shown_height = int(self.picture.getHeight() * scale)
+            pen.drawImage(self.picture, (width - shown_width) // 2, (height - shown_height) // 2, shown_width, shown_height, None)
+        finally:
+            pen.dispose()
+
+
+class DropZonePanel(JPanel):
+    """The place to drop an image file on the Session tab, shown until an
+    image is chosen."""
+
+    HEADLINE = "Drop an image file here"
+    HINTS = [
+        "TIFF, CZI, LIF, ND2 and other files Bio-Formats reads",
+        "or choose a file under Setup, or use the image open in Fiji"
+    ]
+
+    def __init__(self):
+        JPanel.__init__(self)
+        self.setOpaque(False)
+
+    def paintComponent(self, graphics):
+        pen = graphics.create()
+        try:
+            look_smooth(pen)
+            self.paint_zone(pen, self.getWidth(), self.getHeight())
+        finally:
+            pen.dispose()
+
+    def paint_zone(self, pen, width, height):
+        zone = RoundRectangle2D.Float(1.0, 1.0, width - 2.0, height - 2.0, CARD_ARC, CARD_ARC)
+        pen.setColor(pal("back"))
+        pen.fill(zone)
+        pen.setColor(pal("line"))
+        pen.setStroke(BasicStroke(1.5, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND, 1.0, [6.0, 6.0], 0.0))
+        pen.draw(zone)
+        center = width // 2
+        room = width - 40
+        if height < 150:
+            # A low zone: the headline alone, in the middle. Never a cut-off part.
+            pen.setFont(look_font("ui_semibold", 15))
+            pen.setColor(pal("text"))
+            shown = min(pen.getFontMetrics().stringWidth(self.HEADLINE), room)
+            paint_fitted(pen, self.HEADLINE, center - shown // 2, height // 2 + 5, room)
+            return
+        top = max(16, (height - 140) // 2)
+        # An arrow into a tray, in the accent color.
+        pen.setStroke(BasicStroke(2.2, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND))
+        pen.setColor(pal("accent"))
+        pen.drawLine(center, top, center, top + 30)
+        pen.drawLine(center - 10, top + 20, center, top + 30)
+        pen.drawLine(center + 10, top + 20, center, top + 30)
+        pen.drawPolyline([center - 22, center - 22, center + 22, center + 22], [top + 32, top + 42, top + 42, top + 32], 4)
+        pen.setFont(look_font("ui_semibold", 17))
+        pen.setColor(pal("text"))
+        shown = min(pen.getFontMetrics().stringWidth(self.HEADLINE), room)
+        paint_fitted(pen, self.HEADLINE, center - shown // 2, top + 78, room)
+        pen.setFont(look_font("ui", 13))
+        pen.setColor(pal("faint"))
+        for index in range(len(self.HINTS)):
+            if top + 102 + 20 * index > height - 12:
+                break
+            shown = min(pen.getFontMetrics().stringWidth(self.HINTS[index]), room)
+            paint_fitted(pen, self.HINTS[index], center - shown // 2, top + 102 + 20 * index, room)
+
+def paint_wrapped(graphics, text, left, top, room, line_high):
+    """Draw text in as many lines as its words need for room pixels.
+    Returns the baseline after the last line."""
+    metrics = graphics.getFontMetrics()
+    line = ""
+    for word in to_text(text).split(" "):
+        longer = word if line == "" else line + " " + word
+        if line != "" and metrics.stringWidth(longer) > room:
+            graphics.drawString(line, int(left), int(top))
+            top += line_high
+            line = word
+        else:
+            line = longer
+    if line != "":
+        graphics.drawString(line, int(left), int(top))
+        top += line_high
+    return top
+
+
+class ResultsCanvas(JPanel):
+    """The organoid map.
+
+    Center: wide rings, one per parent ROI, from the outside in; the arc of
+    a ring is that region's share of the largest value. In the middle, the
+    picture of the run in a small round window.
+    Left: the headline figures, the list that chooses what the rings show,
+    and the Analyse button.
+    Right: the regions with their values, and what can be pointed at and
+    clicked.
+
+    Pointing at a ring or a region lights it up, with its outline on the
+    picture. A click on the picture shows all of it; a click closes it."""
+
+    def __init__(self):
+        JPanel.__init__(self)
+        self.data = None
+        self.pictures = []
+        self.progress = 1.0
+        self.hover = None
+        self.metric = 0
+        self.zoom = False
+        # What the pointer is over, for the highlight that says "this can be
+        # clicked": None, ("picture",), ("pill", index) or ("run",).
+        self.over = None
+        # Called by the Analyse button; the window sets it.
+        self.on_run = None
+        # The colors of the look in use; read again at every painting.
+        self.shades = look_palette()
+        self.track = self.shades["track"]
+        self.setOpaque(True)
+        watcher = RingWatcher(self)
+        self.addMouseMotionListener(watcher)
+        self.addMouseListener(watcher)
+
+    # ----- what is shown -----
+
+    def metrics(self):
+        if self.data is None:
+            return []
+        return self.data.get("metrics", [])
+
+    def current_metric(self):
+        found = self.metrics()
+        if len(found) == 0:
+            return None
+        if self.metric >= len(found):
+            self.metric = 0
+        return found[self.metric]
+
+    def ring_values(self):
+        """(labels, values, unit) of the rings, at most RING_LIMIT of them."""
+        chosen = self.current_metric()
+        if chosen is None:
+            return ([], [], "count")
+        return (self.data.get("labels", [])[:RING_LIMIT], chosen["values"][:RING_LIMIT], chosen["unit"])
+
+    # ----- geometry, shared by painting and pointing -----
+
+    def geometry(self):
+        width = self.getWidth()
+        height = self.getHeight()
+        labels, values, unit = self.ring_values()
+        count = len(labels)
+        side = 280 if width >= 1100 else 224
+        show_right = width >= 860
+        map_left = side
+        map_right = width - (side if show_right else 0)
+        center_x = (map_left + map_right) / 2.0
+        center_y = height / 2.0
+        outer = max(60.0, min(map_right - map_left, height) / 2.0 - 30.0)
+        # Wide rings with air between them, around a small core.
+        core = max(44.0, outer * 0.27)
+        rings = []
+        band = 0.0
+        step = 0.0
+        if count > 0:
+            step = (outer - core) / float(count)
+            band = max(7.0, min(26.0, step * 0.36))
+            for index in range(count):
+                rings.append((outer - band / 2.0 - index * step, band))
+            picture = max(18.0, min(core, rings[-1][0] - band / 2.0 - max(10.0, (step - band) * 0.45)))
+        else:
+            picture = outer * 0.62
+        # Left column, from the bottom up: the Analyse button, the list that
+        # chooses what the rings show, and above it the figures that fit.
+        inner = side - 52
+        run = (26.0, height - 84.0, float(inner), 52.0)
+        found = self.metrics()
+        pills = []
+        pill_high = 40
+        pill_step = 48
+        figure_step = 116
+        figures_top = 26.0
+        room = run[1] - 22 - figures_top - figure_step
+        shown_pills = 0
+        if len(found) > 1:
+            shown_pills = max(0, min(len(found), int((room - 30) // pill_step)))
+            if shown_pills < 2:
+                shown_pills = 0
+        pills_top = run[1] - 22 - shown_pills * pill_step
+        for index in range(shown_pills):
+            pills.append((26.0, pills_top + index * pill_step, float(inner), float(pill_high)))
+        figures_room = (pills_top - (34 if shown_pills > 0 else 0)) - figures_top
+        figures = max(1, int(figures_room // figure_step))
+        tiles = len(self.data["tiles"]) if self.data is not None else 0
+        compact = False
+        if figures < tiles:
+            # Not room for every figure at full size: smaller figures, and
+            # fewer choices of what the rings show when even that is short.
+            compact = True
+            figure_step = FIGURE_STEP_COMPACT
+            run = (26.0, height - 64.0, float(inner), 42.0)
+            pill_high = 32
+            pill_step = 38
+            shown_pills = len(found) if len(found) > 1 else 0
+            pills_top = run[1] - 22 - shown_pills * pill_step
+            while shown_pills > 0 and (pills_top - 34 - figures_top) // figure_step < tiles:
+                shown_pills -= 1
+                if shown_pills < 2:
+                    shown_pills = 0
+                pills_top = run[1] - 22 - shown_pills * pill_step
+            pills = [(26.0, pills_top + index * pill_step, float(inner), float(pill_high)) for index in range(shown_pills)]
+            figures_room = (pills_top - (34 if shown_pills > 0 else 0)) - figures_top
+            figures = max(1, int(figures_room // figure_step))
+        rows = []
+        if show_right:
+            row_high = 80
+            for index in range(count):
+                top = 60.0 + index * row_high
+                if top + row_high > height - 96:
+                    break
+                rows.append((map_right + 4, top, side - 30, row_high))
+        return {
+            "width": width, "height": height, "side": side, "show_right": show_right,
+            "map_left": map_left, "map_right": map_right, "x": center_x, "y": center_y,
+            "rings": rings, "band": band, "picture": picture, "rows": rows, "pills": pills,
+            "outer": outer, "run": run, "figures": figures, "figures_top": figures_top,
+            "figure_step": figure_step, "pills_top": pills_top, "compact": compact,
+            "pill_metrics": self.pill_metrics(len(pills), len(found))
+        }
+
+    def pill_metrics(self, slots, choices):
+        """Which choice each row of "Rings show" stands for. When not every
+        choice has a row, the last row is "More" (None), which lists them all,
+        and the chosen one always has a row."""
+        if slots >= choices:
+            return list(range(choices))
+        shown = list(range(slots - 1))
+        if len(shown) > 0 and self.metric not in shown and self.metric < choices:
+            shown[-1] = self.metric
+        return shown + [None]
+
+    def ring_at(self, x, y):
+        """Index of the ring or region row under a point, or None."""
+        shape = self.geometry()
+        distance = math.sqrt((x - shape["x"]) ** 2 + (y - shape["y"]) ** 2)
+        for index in range(len(shape["rings"])):
+            radius, band = shape["rings"][index]
+            if abs(distance - radius) <= band / 2.0 + 5:
+                return index
+        for index in range(len(shape["rows"])):
+            left, top, wide, high = shape["rows"][index]
+            if left <= x <= left + wide and top <= y <= top + high:
+                return index
+        return None
+
+    def pill_at(self, x, y):
+        shape = self.geometry()
+        for index in range(len(shape["pills"])):
+            left, top, wide, high = shape["pills"][index]
+            if left <= x <= left + wide and top <= y <= top + high:
+                return index
+        return None
+
+    def on_run_button(self, x, y):
+        left, top, wide, high = self.geometry()["run"]
+        return left <= x <= left + wide and top <= y <= top + high
+
+    def on_picture(self, x, y):
+        shape = self.geometry()
+        return len(self.pictures) > 0 and math.sqrt((x - shape["x"]) ** 2 + (y - shape["y"]) ** 2) <= shape["picture"]
+
+    def point_at(self, x, y):
+        found = None if self.zoom else self.ring_at(x, y)
+        over = None
+        if not self.zoom:
+            pill = self.pill_at(x, y)
+            if pill is not None:
+                over = ("pill", pill)
+            elif self.on_run_button(x, y):
+                over = ("run",)
+            elif self.on_picture(x, y):
+                over = ("picture",)
+        clickable = self.zoom or over is not None
+        try:
+            self.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR if clickable else Cursor.DEFAULT_CURSOR))
+        except ANY_ERROR:
+            pass
+        if found != self.hover or over != self.over:
+            self.hover = found
+            self.over = over
+            self.repaint()
+
+    def click_at(self, x, y):
+        if self.zoom:
+            self.zoom = False
+        else:
+            pill = self.pill_at(x, y)
+            if pill is not None:
+                metric = self.geometry()["pill_metrics"][pill]
+                if metric is None:
+                    self.show_all_choices(x, y)
+                else:
+                    self.metric = metric
+            elif self.on_run_button(x, y):
+                if self.on_run is not None:
+                    self.on_run()
+            elif self.on_picture(x, y):
+                self.zoom = True
+                self.hover = None
+        self.repaint()
+
+    # ----- painting -----
+
+    def ring_color(self, index):
+        """The color of a region: of its ring, its row and its outline."""
+        rings = self.shades["rings"]
+        return rings[index % len(rings)]
+
+    def colors(self):
+        """(own, back, text, faint, line): the colors of the look in use,
+        read again at every painting so that a change of look recolors
+        what is shown."""
+        shades = look_palette()
+        self.shades = shades
+        self.track = shades["track"]
+        return (LOOK_STATE["active"], shades["back"], shades["text"], shades["faint"], shades["line"])
+
+    def paintComponent(self, graphics):
+        self.super__paintComponent(graphics)
+        look_smooth(graphics)
+        shape = self.geometry()
+        width = shape["width"]
+        height = shape["height"]
+        own, back, text, faint, line = self.colors()
+        graphics.setColor(back)
+        graphics.fillRect(0, 0, width, height)
+        self.paint_panels(graphics, shape)
+        self.paint_run(graphics, shape, back)
+        if self.data is None or (len(self.data["tiles"]) == 0 and len(self.pictures) == 0):
+            self.paint_empty(graphics, shape, text, faint, line)
+            return
+        self.paint_figures(graphics, shape, text, faint)
+        self.paint_pills(graphics, shape, back, text, faint, line)
+        self.paint_map(graphics, shape, back, text, faint, line)
+        if shape["show_right"]:
+            self.paint_regions(graphics, shape, text, faint, line)
+        if self.zoom:
+            self.paint_zoom(graphics, width, height, back, faint)
+
+    def paint_panels(self, graphics, shape):
+        """The two side columns sit on cards, like the sections of the other tabs."""
+        graphics.setColor(pal("card"))
+        graphics.fill(RoundRectangle2D.Float(12.0, 12.0, float(shape["side"] - 24), float(shape["height"] - 24), CARD_ARC, CARD_ARC))
+        if shape["show_right"] and self.data is not None and len(self.data["tiles"]) > 0:
+            left = shape["map_right"] - 14.0
+            graphics.fill(RoundRectangle2D.Float(left, 12.0, float(shape["width"] - 12 - left), float(shape["height"] - 24), CARD_ARC, CARD_ARC))
+
+    def paint_empty(self, graphics, shape, text, faint, line):
+        """Before the first run: the empty rings and one line of help."""
+        center_x = shape["x"]
+        center_y = shape["y"]
+        outer = shape["outer"]
+        for share in [1.0, 0.72, 0.44]:
+            radius = outer * share - 13
+            graphics.setStroke(BasicStroke(26.0))
+            graphics.setColor(self.track)
+            graphics.draw(Ellipse2D.Float(center_x - radius, center_y - radius, 2 * radius, 2 * radius))
+        graphics.setFont(look_font("ui_semibold", 15))
+        graphics.setColor(text)
+        paint_fitted(graphics, "No results yet", 26, 48, shape["side"] - 52)
+        graphics.setFont(look_font("ui", 13))
+        graphics.setColor(faint)
+        paint_wrapped(graphics, "Open an image on the Session tab, then press Analyse.", 26, 74, shape["side"] - 52, 19)
+
+    def paint_figures(self, graphics, shape, text, faint):
+        """Left, from the top: one large figure per measurement, with its unit."""
+        room = shape["side"] - 52
+        tiles = self.data["tiles"][:shape["figures"]]
+        self.painted_tiles = [tile["title"] for tile in tiles]
+        if shape.get("compact"):
+            self.paint_figures_compact(graphics, shape, tiles, text, faint, room)
+            return
+        for index in range(len(tiles)):
+            tile = tiles[index]
+            base = shape["figures_top"] + index * shape["figure_step"]
+            graphics.setFont(look_font("ui_semibold", 12))
+            graphics.setColor(faint)
+            paint_fitted(graphics, tile["title"], 26, base + 16, room)
+            shown = tile["value"] * self.progress
+            percent = tile["kind"] == "percent"
+            figure = ("%.1f" % shown) if percent else format_count(shown)
+            final = ("%.1f" % tile["value"]) if percent else format_count(tile["value"])
+            unit = "%" if percent else ("object" if int(round(tile["value"])) == 1 else "objects")
+            graphics.setFont(look_font("ui", 15))
+            unit_wide = graphics.getFontMetrics().stringWidth(unit) + 8
+            size = 44
+            graphics.setFont(look_font("figure", size))
+            while size > 22 and graphics.getFontMetrics().stringWidth(final) > room - unit_wide:
+                size -= 2
+                graphics.setFont(look_font("figure", size))
+            graphics.setColor(text)
+            graphics.drawString(figure, 26, int(base + 64))
+            figure_wide = graphics.getFontMetrics().stringWidth(figure)
+            graphics.setFont(look_font("ui", 15))
+            graphics.setColor(faint)
+            graphics.drawString(unit, int(26 + figure_wide + 8), int(base + 64))
+            graphics.setFont(look_font("ui", 12))
+            note = tile["note"] if tile.get("extra", "") == "" else tile["note"] + ",  " + tile["extra"]
+            if graphics.getFontMetrics().stringWidth(note) > room:
+                note = tile["note"]
+            paint_fitted(graphics, note, 26, base + 88, room)
+
+    def paint_figures_compact(self, graphics, shape, tiles, text, faint, room):
+        """The headline figures when the window is low: title, then figure
+        and unit on one line; the note is left out."""
+        for index in range(len(tiles)):
+            tile = tiles[index]
+            base = shape["figures_top"] + index * shape["figure_step"]
+            graphics.setFont(look_font("ui_semibold", 12))
+            graphics.setColor(faint)
+            paint_fitted(graphics, tile["title"], 26, base + 14, room)
+            percent = tile["kind"] == "percent"
+            shown = tile["value"] * self.progress
+            figure = ("%.1f" % shown) if percent else format_count(shown)
+            unit = "%" if percent else ("object" if int(round(tile["value"])) == 1 else "objects")
+            graphics.setFont(look_font("figure", 30))
+            graphics.setColor(text)
+            graphics.drawString(figure, 26, int(base + 48))
+            figure_wide = graphics.getFontMetrics().stringWidth(figure)
+            graphics.setFont(look_font("ui", 13))
+            graphics.setColor(faint)
+            paint_fitted(graphics, unit, 26 + figure_wide + 8, base + 48, room - figure_wide - 8)
+
+    def paint_pills(self, graphics, shape, back, text, faint, line):
+        """Left, above the button: what the rings show. One row per choice;
+        the chosen one is marked in the accent color."""
+        found = self.metrics()
+        pills = shape["pills"]
+        if len(pills) == 0:
+            return
+        graphics.setFont(look_font("ui_semibold", 12))
+        graphics.setColor(faint)
+        graphics.drawString(PILLS_LABEL, 26, int(shape["pills_top"] - 12))
+        accent = pal("accent")
+        for index in range(len(pills)):
+            left, top, wide, high = pills[index]
+            outline = RoundRectangle2D.Float(left, top, wide, high, 10.0, 10.0)
+            metric = shape["pill_metrics"][index]
+            chosen = metric is not None and metric == self.metric
+            pointed = self.over == ("pill", index)
+            if metric is None:
+                self.paint_more_pill(graphics, outline, left, top, wide, high, pointed, len(found) - index, faint, line)
+                continue
+            if chosen:
+                graphics.setColor(pal_alpha(accent, 30))
+                graphics.fill(outline)
+            elif pointed:
+                graphics.setColor(pal("hover"))
+                graphics.fill(outline)
+            graphics.setStroke(BasicStroke(1.5 if chosen else 1.0))
+            graphics.setColor(accent if chosen else line)
+            graphics.draw(outline)
+            word = METRIC_WORDS[found[metric]["unit"]]
+            graphics.setFont(look_font("ui", 12))
+            word_wide = graphics.getFontMetrics().stringWidth(word)
+            graphics.setColor(pal("link") if chosen else faint)
+            baseline = top + high / 2.0 + 5
+            graphics.drawString(word, int(left + wide - 14 - word_wide), int(baseline))
+            graphics.setFont(look_font("ui_semibold" if chosen else "ui", 13))
+            graphics.setColor(text)
+            paint_fitted(graphics, found[metric]["short"], left + 14, baseline, wide - 28 - word_wide - 10)
+
+    def paint_more_pill(self, graphics, outline, left, top, wide, high, pointed, more, faint, line):
+        """The last row when not every choice has one: it lists them all."""
+        if pointed:
+            graphics.setColor(pal("hover"))
+            graphics.fill(outline)
+        graphics.setStroke(BasicStroke(1.0))
+        graphics.setColor(line)
+        graphics.draw(outline)
+        baseline = top + high / 2.0 + 5
+        graphics.setFont(look_font("ui", 13))
+        graphics.setColor(pal("link"))
+        paint_fitted(graphics, "More choices", left + 14, baseline, wide - 80)
+        graphics.setFont(look_font("ui", 12))
+        graphics.setColor(faint)
+        words = str(more) + " more"
+        graphics.drawString(words, int(left + wide - 14 - graphics.getFontMetrics().stringWidth(words)), int(baseline))
+
+    def show_all_choices(self, x, y):
+        """A menu of every choice of what the rings show."""
+        menu = JPopupMenu()
+        found = self.metrics()
+        for index in range(len(found)):
+            item = JMenuItem(to_text(found[index]["short"]) + "  " + METRIC_WORDS[found[index]["unit"]])
+            item.addActionListener(ChoiceListener(self, index))
+            menu.add(item)
+        menu.show(self, int(x), int(y))
+
+    def choose_metric(self, index):
+        self.metric = index
+        self.repaint()
+
+    def paint_run(self, graphics, shape, back):
+        """Left, at the bottom: the Analyse button, filled in the accent color."""
+        left, top, wide, high = shape["run"]
+        pointed = self.over == ("run",)
+        button = RoundRectangle2D.Float(left, top, wide, high, CARD_ARC, CARD_ARC)
+        graphics.setFont(look_font("ui_semibold", 15))
+        if self.data is not None and len(self.data.get("tiles", [])) > 0:
+            # Results are shown: looking at them comes first, so the button
+            # that starts another run is quiet.
+            if pointed:
+                graphics.setColor(pal("hover"))
+                graphics.fill(button)
+            graphics.setStroke(BasicStroke(1.0))
+            graphics.setColor(pal("line"))
+            graphics.draw(button)
+            graphics.setColor(pal("link"))
+        else:
+            graphics.setColor(pal("fill_hover") if pointed else pal("fill"))
+            graphics.fill(button)
+            graphics.setColor(Color.white)
+        metrics = graphics.getFontMetrics()
+        label_wide = metrics.stringWidth(RUN_LABEL)
+        baseline = top + (high + metrics.getAscent() - metrics.getDescent()) / 2.0
+        graphics.drawString(RUN_LABEL, int(left + (wide - label_wide) / 2.0), int(baseline))
+
+    def paint_map(self, graphics, shape, back, text, faint, line):
+        labels, values, unit = self.ring_values()
+        highest = 0.0
+        for number in values:
+            if number is not None and number > highest:
+                highest = number
+        if unit == "percent":
+            highest = 100.0
+        if highest <= 0:
+            highest = 1.0
+        center_x = shape["x"]
+        center_y = shape["y"]
+        for index in range(len(shape["rings"])):
+            radius, band = shape["rings"][index]
+            color = pal("accent") if self.hover == index else pal_series(index)
+            dimmed = self.hover is not None and self.hover != index
+            graphics.setStroke(BasicStroke(float(band)))
+            graphics.setColor(self.track)
+            graphics.draw(Ellipse2D.Float(center_x - radius, center_y - radius, 2 * radius, 2 * radius))
+            number = values[index]
+            if number is None or number <= 0:
+                continue
+            sweep = -360.0 * min(1.0, number / highest) * self.progress
+            arc = Arc2D.Float(center_x - radius, center_y - radius, 2 * radius, 2 * radius, 90.0, sweep, Arc2D.OPEN)
+            graphics.setStroke(BasicStroke(max(3.0, band - 4.0), BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND))
+            graphics.setColor(look_mix(color, back, 0.65) if dimmed else color)
+            graphics.draw(arc)
+        self.paint_picture(graphics, shape, text, faint, line)
+        self.paint_scale_caption(graphics, shape, values, unit, highest, faint)
+
+    def paint_scale_caption(self, graphics, shape, values, unit, highest, faint):
+        """Under the map, what a full circle stands for: the largest region
+        (counts and densities) or the whole area of a region (percentages)."""
+        if len(shape["rings"]) == 0:
+            return
+        if unit == "percent":
+            words = "Full circle = 100% of the region's area"
+        else:
+            words = "Full circle = the highest value (" + format_metric(highest, unit) + ")"
+        graphics.setFont(look_font("ui", 12))
+        graphics.setColor(faint)
+        baseline = shape["y"] + shape["outer"] + 24
+        if baseline > shape["height"] - 6:
+            return
+        room = shape["map_right"] - shape["map_left"] - 40
+        shown = min(graphics.getFontMetrics().stringWidth(words), room)
+        paint_fitted(graphics, words, shape["x"] - shown / 2.0, baseline, room)
+
+    def paint_outlines(self, graphics, parents, left, top, scale, named):
+        """The parent ROIs on a picture drawn at (left, top) with a scale."""
+        for index in range(len(parents)):
+            name, xs, ys = parents[index]
+            if len(xs) < 3:
+                continue
+            color = pal_series(index, True)
+            path = Path2D.Float()
+            path.moveTo(left + xs[0] * scale, top + ys[0] * scale)
+            for corner in range(1, len(xs)):
+                path.lineTo(left + xs[corner] * scale, top + ys[corner] * scale)
+            path.closePath()
+            if named:
+                graphics.setStroke(BasicStroke(2.0))
+                graphics.setColor(color)
+                graphics.draw(path)
+                graphics.setFont(look_font("ui_semibold", 13))
+                shown = fit_text(graphics, name, (max(xs) - min(xs)) * scale - 36)
+                if len(shown) > 0:
+                    # The name on a dark tag: readable over any part of the picture.
+                    tag_left = left + min(xs) * scale + 8
+                    tag_top = top + min(ys) * scale + 8
+                    tag_wide = graphics.getFontMetrics().stringWidth(shown) + 20
+                    graphics.setColor(Color(0, 0, 0, 170))
+                    graphics.fill(RoundRectangle2D.Float(tag_left, tag_top, float(tag_wide), 24.0, 24.0, 24.0))
+                    graphics.setColor(Color.white)
+                    graphics.drawString(shown, int(tag_left + 10), int(tag_top + 17))
+            elif self.hover == index:
+                graphics.setColor(look_faded(color, 70))
+                graphics.fill(path)
+                graphics.setStroke(BasicStroke(2.0))
+                graphics.setColor(color)
+                graphics.draw(path)
+
+    def paint_picture(self, graphics, shape, text, faint, line):
+        """The picture of the run in the small round window at the center."""
+        center_x = shape["x"]
+        center_y = shape["y"]
+        radius = shape["picture"]
+        window = Ellipse2D.Float(center_x - radius, center_y - radius, 2 * radius, 2 * radius)
+        if len(self.pictures) == 0:
+            return
+        picture = self.pictures[0]
+        image = picture[1]
+        parents = picture[2] if len(picture) > 2 else []
+        # Cover the round window: the shorter side of the picture fills it.
+        scale = 2 * radius / float(min(image.getWidth(), image.getHeight()))
+        left = center_x - image.getWidth() * scale / 2.0
+        top = center_y - image.getHeight() * scale / 2.0
+        old_clip = graphics.getClip()
+        graphics.clip(window)
+        graphics.drawImage(image, int(left), int(top), int(image.getWidth() * scale), int(image.getHeight() * scale), None)
+        self.paint_outlines(graphics, parents, left, top, scale, False)
+        pointed = self.over == ("picture",)
+        if pointed:
+            # Under the pointer the picture says what a click does.
+            graphics.setColor(Color(0, 0, 0, 150))
+            graphics.fill(window)
+            graphics.setFont(look_font("ui_semibold", 13))
+            graphics.setColor(Color.white)
+            badge_wide = graphics.getFontMetrics().stringWidth(PICTURE_BADGE)
+            graphics.drawString(PICTURE_BADGE, int(center_x - badge_wide / 2.0), int(center_y + 22))
+            graphics.setStroke(BasicStroke(2.0, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND))
+            icon_x = int(center_x - 8)
+            icon_y = int(center_y - 16)
+            graphics.drawLine(icon_x, icon_y + 16, icon_x + 16, icon_y)
+            graphics.drawPolyline([icon_x + 8, icon_x + 16, icon_x + 16], [icon_y, icon_y, icon_y + 8], 3)
+            graphics.drawPolyline([icon_x, icon_x, icon_x + 8], [icon_y + 8, icon_y + 16, icon_y + 16], 3)
+        graphics.setClip(old_clip)
+        graphics.setStroke(BasicStroke(2.0 if pointed else 1.0))
+        graphics.setColor(pal("accent") if pointed else line)
+        graphics.draw(window)
+
+    def paint_zoom(self, graphics, width, height, back, faint):
+        """All of the picture, uncropped, over the map; a click closes it."""
+        picture = self.pictures[0]
+        image = picture[1]
+        parents = picture[2] if len(picture) > 2 else []
+        graphics.setColor(pal("back"))
+        graphics.fillRect(0, 0, width, height)
+        room_width = width - 56
+        room_height = height - 76
+        if room_width < 40 or room_height < 40:
+            return
+        scale = min(room_width / float(image.getWidth()), room_height / float(image.getHeight()))
+        shown_width = int(image.getWidth() * scale)
+        shown_height = int(image.getHeight() * scale)
+        left = (width - shown_width) // 2
+        top = 22 + (room_height - shown_height) // 2
+        old_clip = graphics.getClip()
+        graphics.clip(RoundRectangle2D.Float(left, top, shown_width, shown_height, CARD_ARC, CARD_ARC))
+        graphics.drawImage(image, left, top, shown_width, shown_height, None)
+        self.paint_outlines(graphics, parents, left, top, scale, True)
+        if len(picture) > 3 and picture[3] is not None:
+            self.paint_scale_bar(graphics, picture[3], scale, left, top + shown_height, shown_width)
+        graphics.setClip(old_clip)
+        graphics.setFont(look_font("ui", 12))
+        graphics.setColor(faint)
+        caption = to_text(picture[0])
+        shown = min(graphics.getFontMetrics().stringWidth(caption), width - 40)
+        paint_fitted(graphics, caption, (width - shown) // 2, height - 20, width - 40)
+        # The way back, as a button in the corner (a click anywhere works).
+        graphics.setFont(look_font("ui_semibold", 13))
+        words = "Back to the map"
+        metrics = graphics.getFontMetrics()
+        back_wide = metrics.stringWidth(words) + 32
+        graphics.setColor(pal("fill"))
+        graphics.fill(RoundRectangle2D.Float(width - back_wide - 18.0, 14.0, float(back_wide), 32.0, 10.0, 10.0))
+        graphics.setColor(Color.white)
+        graphics.drawString(words, int(width - back_wide - 18 + 16), int(14 + (32 + metrics.getAscent() - metrics.getDescent()) / 2.0))
+
+    def paint_scale_bar(self, graphics, calibration, scale, left, bottom, shown_width):
+        """A white scale bar with its length, at the bottom left of the picture."""
+        per_pixel, unit = calibration
+        length = scale_bar_length(per_pixel / scale, shown_width)
+        bar = int(round(length / per_pixel * scale))
+        if bar < 8:
+            return
+        words = (("%g" % length) + " " + unit_words(unit))
+        graphics.setFont(look_font("ui_semibold", 12))
+        wide = max(bar, graphics.getFontMetrics().stringWidth(words))
+        graphics.setColor(Color(0, 0, 0, 150))
+        graphics.fill(RoundRectangle2D.Float(left + 12.0, bottom - 46.0, float(wide + 16), 34.0, 8.0, 8.0))
+        graphics.setColor(Color.white)
+        graphics.fillRect(int(left + 20), int(bottom - 22), bar, 4)
+        graphics.drawString(words, int(left + 20), int(bottom - 28))
+
+    def paint_regions(self, graphics, shape, text, faint, line):
+        """Right, from the top: the regions, one row per ring, then what
+        can be pointed at and clicked."""
+        labels, values, unit = self.ring_values()
+        rows = shape["rows"]
+        chosen = self.current_metric()
+        left = shape["map_right"] + 4
+        wide = shape["side"] - 30
+        graphics.setFont(look_font("ui_semibold", 12))
+        graphics.setColor(faint)
+        if chosen is not None:
+            paint_fitted(graphics, chosen["name"] + " by region", left, 40, wide)
+        found = self.metrics()
+        areas = self.data.get("areas", [])
+        for index in range(len(rows)):
+            row_left, row_top, row_wide, row_high = rows[index]
+            color = pal("accent") if self.hover == index else pal_series(index)
+            if self.hover == index:
+                graphics.setColor(pal_alpha(pal("accent"), 22 if not look_palette()["dark"] else 40))
+                graphics.fill(RoundRectangle2D.Float(row_left - 10, row_top + 2, row_wide + 14, row_high - 4, 10.0, 10.0))
+            graphics.setColor(line)
+            graphics.setStroke(BasicStroke(1.0))
+            graphics.drawLine(int(row_left), int(row_top + row_high), int(row_left + row_wide), int(row_top + row_high))
+            number = values[index]
+            figure = format_metric(None if number is None else number * self.progress, unit)
+            size = 22
+            graphics.setFont(look_font("figure", size))
+            while size > 14 and graphics.getFontMetrics().stringWidth(format_metric(number, unit)) > row_wide * 0.5:
+                size -= 2
+                graphics.setFont(look_font("figure", size))
+            figure_wide = graphics.getFontMetrics().stringWidth(format_metric(number, unit))
+            graphics.setColor(text)
+            graphics.drawString(figure, int(row_left + row_wide - figure_wide), int(row_top + 32))
+            graphics.setColor(color)
+            graphics.fillOval(int(row_left), int(row_top + 20), 9, 9)
+            graphics.setFont(look_font("ui", 13))
+            graphics.setColor(text if self.hover in (None, index) else faint)
+            paint_fitted(graphics, labels[index], row_left + 18, row_top + 29, row_wide - 18 - figure_wide - 14)
+            # The other values of this region, and its area: as many as fit whole.
+            others = []
+            for metric_index in range(len(found)):
+                if metric_index == self.metric or index >= len(found[metric_index]["values"]):
+                    continue
+                other = found[metric_index]
+                word = "" if other["unit"] == "density" else other["short"] + (" area" if other["unit"] == "percent" else "")
+                others.append((word + " " + format_metric(other["values"][index], other["unit"])).strip())
+            if index < len(areas) and areas[index] != "":
+                graphics.setFont(look_font("ui", 12))
+                graphics.setColor(faint)
+                paint_fitted(graphics, "Area " + areas[index], row_left + 18, row_top + 68, row_wide - 18)
+            graphics.setFont(look_font("ui", 12))
+            graphics.setColor(faint)
+            measure = graphics.getFontMetrics()
+            line_text = ""
+            for other_text in others:
+                longer = other_text if line_text == "" else line_text + ",  " + other_text
+                if measure.stringWidth(longer) > row_wide - 18:
+                    break
+                line_text = longer
+            graphics.drawString(line_text, int(row_left + 18), int(row_top + 50))
+        # What can be done here.
+        top = (rows[-1][1] + rows[-1][3] if len(rows) > 0 else 60) + 30
+        graphics.setFont(look_font("ui", 12))
+        graphics.setColor(faint)
+        hints = ["Rings from the outside in follow this list.", "Point at a ring to light up its region."]
+        if len(self.pictures) > 0:
+            hints.append("Click the picture to see all of it.")
+        if len(shape["pills"]) > 0:
+            hints.append("Click a name on the left to change what the rings show.")
+        more = len(self.data.get("labels", [])) - len(rows)
+        if more > 0:
+            hints.append(str(more) + " more regions are in the tables.")
+        for hint in hints:
+            if top > shape["height"] - 30:
+                break
+            top = paint_wrapped(graphics, hint, left, top, wide, 17) + 8
+
+class ChoiceListener(ActionListener):
+    """A choice in the menu of what the rings show."""
+
+    def __init__(self, canvas, index):
+        self.canvas = canvas
+        self.index = index
+
+    def actionPerformed(self, event):
+        self.canvas.choose_metric(self.index)
+
+
+class RingWatcher(MouseAdapter):
+    """Tells the organoid map where the pointer is."""
+
+    def __init__(self, canvas):
+        self.canvas = canvas
+
+    def mouseMoved(self, event):
+        self.canvas.point_at(event.getX(), event.getY())
+
+    def mouseExited(self, event):
+        self.canvas.point_at(-1000, -1000)
+
+    def mouseClicked(self, event):
+        self.canvas.click_at(event.getX(), event.getY())
+
+
+class ResultsAnimation(ActionListener):
+    """Lets the numbers and bars of the Results tab grow for half a second."""
+
+    def __init__(self, canvas):
+        self.canvas = canvas
+        self.started = time.time()
+        self.timer = SwingTimer(16, self)
+
+    def actionPerformed(self, event):
+        elapsed = (time.time() - self.started) / 0.6
+        if elapsed >= 1.0:
+            self.canvas.progress = 1.0
+            self.timer.stop()
+        else:
+            # Ease out: fast at first, slow at the end.
+            self.canvas.progress = 1.0 - (1.0 - elapsed) ** 3
+        self.canvas.repaint()
+
+
+class JobBarWatcher(PropertyChangeListener):
+    """Shows the progress bar and the Cancel button while a job can be
+    cancelled, and hides them when it has ended."""
+
+    def __init__(self, window):
+        self.window = window
+
+    def propertyChange(self, event):
+        running = bool(self.window.job_cancel_button.isEnabled())
+        self.window.job_progress.setVisible(running)
+        self.window.job_cancel_button.setVisible(running)
+        self.window.job_side.revalidate()
+        self.window.job_side.repaint()
+
+
+class TipFollower(DocumentListener):
+    """Keeps the tooltip of a text field equal to its whole text, so that a
+    long path that does not fit can still be read."""
+
+    def __init__(self, field):
+        self.field = field
+
+    def follow(self):
+        text = to_text(self.field.getText())
+        self.field.setToolTipText(text if text.strip() != "" else None)
+
+    def insertUpdate(self, event):
+        self.follow()
+
+    def removeUpdate(self, event):
+        self.follow()
+
+    def changedUpdate(self, event):
+        self.follow()
+
+
+class LogScroll(JScrollPane):
+    """The scrolling run log: 170 pixels high, or less in a low window."""
+
+    def __init__(self, view, window):
+        JScrollPane.__init__(self, view)
+        self.window = window
+
+    def getPreferredSize(self):
+        return Dimension(600, max(80, min(170, int(self.window.getHeight() * 0.2))))
+
+
+class StringFollower(PropertyChangeListener):
+    """Writes the string of a progress bar into a label beside it."""
+
+    def __init__(self, label):
+        self.label = label
+
+    def propertyChange(self, event):
+        try:
+            self.label.setText(to_text(event.getNewValue() or ""))
+        except ANY_ERROR:
+            pass
+
+
+class ChannelTitleFollower(DocumentListener):
+    """Titles a channel's tab with its name ("C1 DAPI") as it is typed."""
+
+    def __init__(self, window, channel):
+        self.window = window
+        self.channel = channel
+
+    def follow(self):
+        try:
+            self.window.title_channel_tab(self.channel)
+        except ANY_ERROR:
+            pass
+
+    def insertUpdate(self, event):
+        self.follow()
+
+    def removeUpdate(self, event):
+        self.follow()
+
+    def changedUpdate(self, event):
+        self.follow()
+
+
+class UnitHintFollower(DocumentListener):
+    """The hints beside the pixel width and height say the unit typed below
+    them: "um per pixel" rather than "units per pixel"."""
+
+    def __init__(self, window):
+        self.window = window
+
+    def follow(self):
+        try:
+            unit = text_value(self.window.spatial_unit_field)
+            words = "units per pixel" if unit in ("", "pixel", "pixels") else unit_words(unit) + " per pixel"
+            self.window.pixel_width_hint.setText(words)
+            self.window.pixel_height_hint.setText(words)
+        except ANY_ERROR:
+            pass
+
+    def insertUpdate(self, event):
+        self.follow()
+
+    def removeUpdate(self, event):
+        self.follow()
+
+    def changedUpdate(self, event):
+        self.follow()
+
+
+class ComboTipFollower(ActionListener):
+    """Keeps the tooltip of a list equal to the chosen entry."""
+
+    def __init__(self, combo):
+        self.combo = combo
+
+    def actionPerformed(self, event):
+        self.combo.setToolTipText(to_text(self.combo.getSelectedItem()))
+
+
+class SessionShownListener(ChangeListener):
+    """Brings the channel list of the Session tab up to date whenever the
+    tab is shown (channel names and modes are set on the Channels tab)."""
+
+    def __init__(self, window):
+        self.window = window
+
+    def stateChanged(self, event):
+        try:
+            if self.window.main_tabs.getSelectedIndex() == 0:
+                self.window.refresh_channel_list()
+        except ANY_ERROR:
+            pass
+
+
+class LookWindowListener(WindowAdapter):
+    """Puts Fiji's own look back when the window has closed."""
+
+    def windowClosed(self, event):
+        look_restore()
+
+
+# -----------------------------------------------------------------------------
+# The parts every tab is made of
+# -----------------------------------------------------------------------------
+#
+# A tab is a page: its sections are cards (Card) one under the other, in a
+# centered column of a largest width, on an 8-pixel grid. A form row is
+# added with form_row(): a right-aligned label, the control and after it a
+# button or a short hint (a longer hint goes on its own line under the
+# control). The labels of one tab share one width (FormLabel), measured
+# when the window is laid out, so the controls line up and no label is
+# ever cut. Explanations are WrapNote texts, which wrap to the width they
+# get and never make a column wider. Forms whose labels are long sentences
+# (the Analyses tab) put each label above its control instead.
+
+PAGE_WIDTH = 920
+SESSION_WIDTH = 1240
+HELP_WIDTH = 720
+PAGE_PAD = 24
+GAP = 16
+ROW_GAP = 5
+FIELD_WIDTH_SHORT = 120
+FIELD_WIDTH = 280
+FIELD_WIDTH_STACKED = 440
+NOTE_MIN_WIDTH = 120
+HINT_INLINE_LIMIT = 36
+# The side of the small picture of the source image on the Session tab.
+PREVIEW_SIDE = 264
+# The room between quiet (link) buttons side by side.
+LINK_GAP = 20
+# The longest channel name a tab of the Channels tab shows whole.
+CHANNEL_TITLE_LIMIT = 14
+# The summary of the source image: (caption, key) per row.
+SUMMARY_ROWS = [
+    ("Name", "name"), ("Size", "size"), ("", "extent"), ("Channels", "channels"), ("Z slices", "slices"),
+    ("Time frames", "frames"), ("Bit depth", "depth"), ("Pixel size", "pixel"), ("Position", "position"),
+    ("Folder", "path"), ("", "warning")
+]
+# Kept for older code that sized the content column by this name.
+CONTENT_WIDTH = PAGE_WIDTH
+
+
+class ColumnLayout(LayoutManager):
+    """Gives the one child the full height and at most `limit` pixels of
+    width, centered, inside the parent's border."""
+
+    def __init__(self, limit):
+        self.limit = limit
+
+    def addLayoutComponent(self, name, component):
+        pass
+
+    def removeLayoutComponent(self, component):
+        pass
+
+    def preferredLayoutSize(self, parent):
+        insets = parent.getInsets()
+        if parent.getComponentCount() == 0:
+            return Dimension(insets.left + insets.right, insets.top + insets.bottom)
+        wanted = parent.getComponent(0).getPreferredSize()
+        return Dimension(min(wanted.width, self.limit) + insets.left + insets.right, wanted.height + insets.top + insets.bottom)
+
+    def minimumLayoutSize(self, parent):
+        insets = parent.getInsets()
+        if parent.getComponentCount() == 0:
+            return Dimension(insets.left + insets.right, insets.top + insets.bottom)
+        wanted = parent.getComponent(0).getMinimumSize()
+        return Dimension(min(wanted.width, self.limit) + insets.left + insets.right, wanted.height + insets.top + insets.bottom)
+
+    def layoutContainer(self, parent):
+        if parent.getComponentCount() == 0:
+            return
+        insets = parent.getInsets()
+        room = parent.getWidth() - insets.left - insets.right
+        width = min(room, self.limit)
+        parent.getComponent(0).setBounds(
+            insets.left + (room - width) // 2, insets.top, width, parent.getHeight() - insets.top - insets.bottom
+        )
+
+
+class WidthLayout(LayoutManager):
+    """Gives the one child at least `width` pixels (more when it wants
+    more) and its own height. Used to give fields of one kind one width."""
+
+    def __init__(self, width):
+        self.width = width
+
+    def addLayoutComponent(self, name, component):
+        pass
+
+    def removeLayoutComponent(self, component):
+        pass
+
+    def preferredLayoutSize(self, parent):
+        if parent.getComponentCount() == 0:
+            return Dimension(0, 0)
+        wanted = parent.getComponent(0).getPreferredSize()
+        return Dimension(max(self.width, wanted.width), wanted.height)
+
+    def minimumLayoutSize(self, parent):
+        if parent.getComponentCount() == 0:
+            return Dimension(0, 0)
+        return parent.getComponent(0).getMinimumSize()
+
+    def layoutContainer(self, parent):
+        if parent.getComponentCount() > 0:
+            parent.getComponent(0).setBounds(0, 0, parent.getWidth(), parent.getHeight())
+
+
+class ShareLayout(LayoutManager):
+    """Two children side by side: the first gets `share` of the width."""
+
+    def __init__(self, share, gap):
+        self.share = share
+        self.gap = gap
+
+    def addLayoutComponent(self, name, component):
+        pass
+
+    def removeLayoutComponent(self, component):
+        pass
+
+    def preferredLayoutSize(self, parent):
+        first = parent.getComponent(0).getPreferredSize()
+        second = parent.getComponent(1).getPreferredSize()
+        return Dimension(first.width + second.width + self.gap, max(first.height, second.height))
+
+    def minimumLayoutSize(self, parent):
+        first = parent.getComponent(0).getMinimumSize()
+        second = parent.getComponent(1).getMinimumSize()
+        return Dimension(first.width + second.width + self.gap, max(first.height, second.height))
+
+    def layoutContainer(self, parent):
+        room = parent.getWidth() - self.gap
+        left = int(room * self.share)
+        parent.getComponent(0).setBounds(0, 0, left, parent.getHeight())
+        parent.getComponent(1).setBounds(left + self.gap, 0, room - left, parent.getHeight())
+
+
+class PagePanel(JPanel, Scrollable):
+    """The page of a tab in a scrolling area: always as wide as the visible
+    area (never a sideways scroll bar), its content in a centered column."""
+
+    def __init__(self, content, limit, pad):
+        JPanel.__init__(self, ColumnLayout(limit))
+        self.setBorder(BorderFactory.createEmptyBorder(pad, pad, pad, pad))
+        self.add(content)
+
+    def getPreferredScrollableViewportSize(self):
+        return self.getPreferredSize()
+
+    def getScrollableUnitIncrement(self, visible, orientation, direction):
+        return 16
+
+    def getScrollableBlockIncrement(self, visible, orientation, direction):
+        return max(16, visible.height - 48)
+
+    def getScrollableTracksViewportWidth(self):
+        return True
+
+    def getScrollableTracksViewportHeight(self):
+        parent = self.getParent()
+        return isinstance(parent, JViewport) and parent.getHeight() > self.getPreferredSize().height
+
+
+def page_scroll(content, limit=PAGE_WIDTH, pad=PAGE_PAD):
+    """A page that scrolls up and down: content in a centered column."""
+    scroll = JScrollPane(PagePanel(content, limit, pad))
+    scroll.setBorder(BorderFactory.createEmptyBorder())
+    scroll.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER)
+    scroll.getVerticalScrollBar().setUnitIncrement(16)
+    return scroll
+
+
+def page_fill(content, limit=PAGE_WIDTH, pad=PAGE_PAD):
+    """A page whose content fills the height of the tab."""
+    page = JPanel(ColumnLayout(limit))
+    page.setBorder(BorderFactory.createEmptyBorder(pad, pad, pad, pad))
+    page.add(content)
+    return page
+
+
+def in_column(component):
+    """The component in a centered column of at most PAGE_WIDTH pixels."""
+    return page_fill(component, PAGE_WIDTH)
+
+
+def stack(parts):
+    """Cards one under the other, GAP pixels apart, at their own height."""
+    column = JPanel()
+    column.setLayout(BoxLayout(column, BoxLayout.Y_AXIS))
+    column.setOpaque(False)
+    first = True
+    for part in parts:
+        if part is None:
+            continue
+        if not first:
+            column.add(Box.createRigidArea(Dimension(0, GAP)))
+        part.setAlignmentX(0.0)
+        column.add(part)
+        first = False
+    return column
+
+
+def grid_add(panel, component, x, y, width=1, weightx=0.0, weighty=0.0, fill=None, anchor=None, insets=None):
+    gbc = GridBagConstraints()
+    gbc.gridx = x
+    gbc.gridy = y
+    gbc.gridwidth = width
+    gbc.weightx = weightx
+    gbc.weighty = weighty
+    gbc.fill = GridBagConstraints.NONE if fill is None else fill
+    gbc.anchor = GridBagConstraints.WEST if anchor is None else anchor
+    gbc.insets = Insets(0, 0, 0, 0) if insets is None else insets
+    panel.add(component, gbc)
+
+
+def form_next_row(panel):
+    """The next free row of a form; forms number their rows themselves."""
+    row = panel.getClientProperty("cellquant.rows")
+    row = 0 if row is None else int(row)
+    panel.putClientProperty("cellquant.rows", row + 1)
+    return row
+
+
+def html_text(text):
+    text = to_text(text)
+    for pair in [("&", "&amp;"), ("<", "&lt;"), (">", "&gt;")]:
+        text = text.replace(pair[0], pair[1])
+    return text
+
+
+class Card(JPanel):
+    """One section of a tab: a rounded surface with a quiet title. Rows are
+    added with form_row() and form_wide(). stacked: labels above controls."""
+
+    def __init__(self, title=None, stacked=False, grow=False):
+        JPanel.__init__(self, GridBagLayout())
+        self.grow = grow
+        self.setOpaque(False)
+        self.setBorder(BorderFactory.createEmptyBorder(14, 20, 16, 20))
+        self.putClientProperty("cellquant.section", to_text(title or ""))
+        if stacked:
+            self.putClientProperty("cellquant.stacked", "yes")
+        if title:
+            heading = JLabel(to_text(title))
+            heading.setFont(look_font("ui_semibold", 15))
+            form_wide(self, heading, 0, 8)
+
+    def getMaximumSize(self):
+        if self.grow:
+            return Dimension(32767, 32767)
+        return Dimension(32767, self.getPreferredSize().height)
+
+    def paintComponent(self, graphics):
+        pen = graphics.create()
+        try:
+            look_smooth(pen)
+            pen.setColor(pal("card"))
+            pen.fill(RoundRectangle2D.Float(0.0, 0.0, float(self.getWidth()), float(self.getHeight()), CARD_ARC, CARD_ARC))
+        finally:
+            pen.dispose()
+
+
+def form_group():
+    """The labels of one tab, which share one width."""
+    return {"labels": [], "font": None, "count": 0, "width": 0}
+
+
+def form_group_width(group):
+    if group is None or len(group["labels"]) == 0:
+        return 0
+    font = group["labels"][0].getFont()
+    if group["font"] is None or font is None or not font.equals(group["font"]) or group["count"] != len(group["labels"]):
+        widest = 0
+        for label in group["labels"]:
+            widest = max(widest, label.super__getPreferredSize().width)
+        group["font"] = font
+        group["count"] = len(group["labels"])
+        group["width"] = widest + 2
+    return group["width"]
+
+
+class FormLabel(JLabel):
+    """The label of a form row: right-aligned, as wide as the widest label
+    of its group, measured with the font in use when the window is laid out."""
+
+    def __init__(self, text, group):
+        JLabel.__init__(self, to_text(text))
+        self.group = group
+        self.setHorizontalAlignment(SwingConstants.RIGHT)
+        if group is not None:
+            group["labels"].append(self)
+
+    def getPreferredSize(self):
+        own = self.super__getPreferredSize()
+        return Dimension(max(own.width, form_group_width(self.group)), own.height)
+
+    def getMinimumSize(self):
+        return self.getPreferredSize()
+
+
+class NoteWatcher(ComponentAdapter):
+    """Lays a WrapNote out again when its width has changed, so that its
+    height follows the number of lines it now needs."""
+
+    def componentResized(self, event):
+        note = event.getComponent()
+        width = note.getWidth()
+        if note.getClientProperty("cellquant.width") != width:
+            note.putClientProperty("cellquant.width", width)
+            note.revalidate()
+
+
+class WrapNote(JTextArea):
+    """Text that wraps to the width it is given and never makes its column
+    wider: explanations, hints under fields, values that can be long.
+    It can be selected and copied."""
+
+    def __init__(self, text, size=13, secondary=True, copyable=False):
+        JTextArea.__init__(self, to_text(text))
+        self.setEditable(False)
+        self.setLineWrap(True)
+        self.setWrapStyleWord(True)
+        self.setOpaque(False)
+        # A value (a path, a file name) can be selected and copied with the
+        # keyboard; an explanation is skipped by Tab.
+        self.setFocusable(bool(copyable))
+        self.setBorder(BorderFactory.createEmptyBorder(0, 0, 0, 0))
+        self.setFont(look_font("ui", size))
+        if secondary:
+            self.putClientProperty("FlatLaf.style", "foreground: $Label.disabledForeground")
+        self.addComponentListener(NoteWatcher())
+
+    def getPreferredSize(self):
+        wanted = self.super__getPreferredSize()
+        return Dimension(min(wanted.width, NOTE_MIN_WIDTH), wanted.height)
+
+    def getMinimumSize(self):
+        return self.getPreferredSize()
+
+    def getMaximumSize(self):
+        return Dimension(32767, self.super__getPreferredSize().height)
+
+    def scrollRectToVisible(self, rectangle):
+        # A note never scrolls its page: its caret (at the end of the text
+        # after setText) would otherwise pull the page to the bottom.
+        pass
+
+
+def looks_numeric(text):
+    try:
+        float(to_text(text))
+        return True
+    except (TypeError, ValueError):
+        return False
+
+
+def make_note(text):
+    return WrapNote(text, 13)
+
+
+def form_hint(text):
+    """A short hint (a unit, what 0 or -1 means) for after a control."""
+    return JLabel(to_text(text))
+
+
+def form_wide(panel, component, top=ROW_GAP, bottom=ROW_GAP, fill=GridBagConstraints.HORIZONTAL):
+    """A row of the whole width of a form: a heading, a note, a button row."""
+    grid_add(panel, component, 0, form_next_row(panel), width=3, weightx=1.0, fill=fill, insets=Insets(top, 0, bottom, 0))
+
+
+def form_under(panel, component, bottom=ROW_GAP):
+    """A row under the control column, without a label (a check box, a
+    row of buttons, a note that belongs to the control above)."""
+    grid_add(panel, component, 1, form_next_row(panel), width=2, weightx=1.0,
+             fill=GridBagConstraints.HORIZONTAL, insets=Insets(0, 0, bottom, 0))
+
+
+def form_is_wide(component):
+    """True for controls that take the whole width of the form: paths and
+    other long text (30 columns or more), lists with long entries, panels."""
+    if isinstance(component, JTextField):
+        return component.getColumns() >= 30 or component.getClientProperty("cellquant.wide") is not None
+    if isinstance(component, JComboBox):
+        return component.getClientProperty("cellquant.wide") is not None or \
+            component.getPreferredSize().width > FIELD_WIDTH + 40
+    return isinstance(component, (JScrollPane, JPanel))
+
+
+def form_control(component, hint=None, width=None):
+    """A control at the width of its kind (or `width` for a text field),
+    with a short hint after it. A wide control asks for little width (it is
+    stretched to the form), so that a narrow window never squeezes the
+    other controls."""
+    control = component
+    if isinstance(component, JTextField) and form_is_wide(component):
+        component.putClientProperty("cellquant.wide", "yes")
+        component.setColumns(12)
+    elif isinstance(component, JTextField):
+        if width is None:
+            width = FIELD_WIDTH_SHORT if component.getColumns() <= 12 else FIELD_WIDTH
+        control = JPanel(WidthLayout(width))
+        control.add(component)
+    elif isinstance(component, JComboBox):
+        if form_is_wide(component):
+            component.putClientProperty("cellquant.wide", "yes")
+            component.setPrototypeDisplayValue("Mmmmmmmmmmmmmmmmmmmm")
+        control = JPanel(WidthLayout(FIELD_WIDTH))
+        control.add(component)
+    if hint is None:
+        return control
+    hint.setFont(look_font("ui", 12))
+    hint.putClientProperty("FlatLaf.style", "foreground: $Label.disabledForeground")
+    row = JPanel()
+    row.setLayout(BoxLayout(row, BoxLayout.X_AXIS))
+    row.add(control)
+    row.add(Box.createHorizontalStrut(10))
+    row.add(hint)
+    return row
+
+
+def split_label(text):
+    """'Channel to tune (0 = first channel that detects objects)' ->
+    ('Channel to tune', '0 = first channel that detects objects'). A short
+    part in parentheses stays in the label."""
+    text = to_text(text)
+    start = text.rfind(" (")
+    if text.endswith(")") and start > 0 and len(text) - start - 3 >= 10:
+        return (text[:start], text[start + 2:-1])
+    return (text, "")
+
+
+def form_row(panel, group, label_text, component, extra=None):
+    """One row of a form: label, control, and a button or a hint (a JLabel)."""
+    if panel.getClientProperty("cellquant.stacked") is not None:
+        form_row_stacked(panel, label_text, component, extra)
+        return
+    row = form_next_row(panel)
+    hint = extra if isinstance(extra, JLabel) else None
+    button = extra if (extra is not None and hint is None) else None
+    grid_add(panel, FormLabel(label_text, group), 0, row, anchor=GridBagConstraints.EAST,
+             insets=Insets(ROW_GAP, 0, ROW_GAP, 12))
+    long_hint = hint is not None and len(to_text(hint.getText())) > HINT_INLINE_LIMIT
+    wide = form_is_wide(component) or button is not None
+    grid_add(panel, form_control(component, None if long_hint else hint), 1, row, weightx=1.0,
+             fill=GridBagConstraints.HORIZONTAL if wide else GridBagConstraints.NONE, insets=Insets(ROW_GAP, 0, ROW_GAP, 0))
+    if button is not None:
+        grid_add(panel, button, 2, row, insets=Insets(ROW_GAP, 8, ROW_GAP, 0))
+    if long_hint:
+        form_under(panel, WrapNote(hint.getText(), 12), ROW_GAP + 3)
+
+
+def form_row_stacked(panel, label_text, component, extra=None):
+    """A row with its label above the control and the part of the label in
+    parentheses as a hint under it."""
+    if isinstance(component, JCheckBox) or to_text(label_text) == "":
+        form_wide(panel, component, ROW_GAP + 2, ROW_GAP + 2, GridBagConstraints.NONE)
+        return
+    main, note = split_label(label_text)
+    grid_add(panel, JLabel(main), 0, form_next_row(panel), width=3, weightx=1.0, insets=Insets(ROW_GAP + 5, 0, 5, 0))
+    row = form_next_row(panel)
+    wide = extra is not None or form_is_wide(component)
+    fill = GridBagConstraints.HORIZONTAL if wide else GridBagConstraints.NONE
+    if extra is not None:
+        grid_add(panel, form_control(component), 0, row, width=2, weightx=1.0, fill=fill, insets=Insets(0, 0, ROW_GAP, 0))
+        grid_add(panel, extra, 2, row, insets=Insets(0, 8, ROW_GAP, 0))
+    else:
+        # Text of a stacked form gets room for a long value, but not the
+        # whole width of the card.
+        short = isinstance(component, JTextField) and component.getColumns() <= 12
+        grid_add(panel, form_control(component, None, FIELD_WIDTH_SHORT if short else FIELD_WIDTH_STACKED), 0, row,
+                 width=3, weightx=1.0, fill=fill, insets=Insets(0, 0, ROW_GAP, 0))
+    if note != "":
+        grid_add(panel, WrapNote(note, 12), 0, form_next_row(panel), width=3, weightx=1.0,
+                 fill=GridBagConstraints.HORIZONTAL, insets=Insets(0, 0, ROW_GAP + 3, 0))
+
+
+def button_row(buttons, gap=8):
+    """Buttons side by side at their own width, from the left."""
+    row = JPanel()
+    row.setLayout(BoxLayout(row, BoxLayout.X_AXIS))
+    first = True
+    for button in buttons:
+        if not first:
+            row.add(Box.createHorizontalStrut(gap))
+        row.add(button)
+        first = False
+    row.add(Box.createHorizontalGlue())
+    return row
+
+
+class Segmented(JPanel):
+    """A few choices side by side on one track, like the segmented controls
+    of macOS and iOS; exactly one is chosen. The chosen one is lighter (or
+    white) and its text semibold. shown: what a segment says, by name.
+
+    It also answers the few questions a combo box answers (getItemCount,
+    getItemAt, getSelectedItem, setSelectedItem), for scripts written for
+    the earlier Appearance list."""
+
+    def __init__(self, names, chosen, on_choose, shown=None):
+        JPanel.__init__(self, FlowLayout(FlowLayout.CENTER, 0, 0))
+        self.setOpaque(False)
+        self.setBorder(BorderFactory.createEmptyBorder(2, 2, 2, 2))
+        self.names = list(names)
+        self.on_choose = on_choose
+        self.buttons = {}
+        group = ButtonGroup()
+        for name in names:
+            words = shown.get(name, name) if shown is not None else name
+            button = JToggleButton(words, name == chosen)
+            set_style(button, SEGMENT_STYLE)
+            button.addActionListener(SegmentListener(name, self))
+            group.add(button)
+            self.add(button)
+            self.buttons[name] = button
+        self.mark()
+
+    def choose(self, name):
+        if name in self.buttons:
+            self.buttons[name].setSelected(True)
+        self.mark()
+
+    def mark(self):
+        """The chosen segment in semibold, the others regular: a second cue
+        beside the lighter background."""
+        for name in self.names:
+            button = self.buttons[name]
+            button.setFont(look_font("ui_semibold" if button.isSelected() else "ui", 13))
+
+    def chosen(self, name):
+        self.mark()
+        self.on_choose(name)
+
+    def getItemCount(self):
+        return len(self.names)
+
+    def getItemAt(self, index):
+        return self.names[index]
+
+    def getSelectedItem(self):
+        for name in self.names:
+            if self.buttons[name].isSelected():
+                return name
+        return None
+
+    def setSelectedItem(self, name):
+        name = to_text(name)
+        if name in self.buttons and self.getSelectedItem() != name:
+            self.buttons[name].setSelected(True)
+            self.chosen(name)
+
+    def paintComponent(self, graphics):
+        pen = graphics.create()
+        try:
+            look_smooth(pen)
+            pen.setColor(pal("segment_track"))
+            pen.fill(RoundRectangle2D.Float(0.0, 0.0, float(self.getWidth()), float(self.getHeight()), 10.0, 10.0))
+        finally:
+            pen.dispose()
+
+
+class SegmentListener(ActionListener):
+    def __init__(self, name, switch):
+        self.name = name
+        self.switch = switch
+
+    def actionPerformed(self, event):
+        self.switch.chosen(self.name)
+
+
+def tidy_tab(container, inside=False):
+    """Make everything on a card transparent, so that the card shows
+    through: panels, check boxes, scrolling areas and texts. Text fields,
+    lists and buttons keep their own background. Runs once after build_ui;
+    the setting stays through changes of the look."""
+    for child in container.getComponents():
+        here = inside or isinstance(child, Card)
+        if here and not isinstance(child, Card):
+            if isinstance(child, (JPanel, JCheckBox, JViewport, JScrollPane)):
+                child.setOpaque(False)
+            elif isinstance(child, JTextComponent) and not isinstance(child, JTextField):
+                child.setOpaque(False)
+        if hasattr(child, "getComponents"):
+            tidy_tab(child, here)
+
+# -----------------------------------------------------------------------------
 # Main application
 # -----------------------------------------------------------------------------
 
@@ -552,27 +3490,35 @@ class CellQuantStudioUniversal(JFrame):
         # ID of the source image whose unsaved changes the user has accepted.
         self.accepted_changes_id = None
 
-        self.build_ui()
-        self.apply_preset_by_name(PRESET_NAMES[0])
+        # What the Results tab shows: set by show_results().
+        self.results_animation = None
+
+        if look_preference() != LOOK_FIJI:
+            look_install(look_preference())
+        self.addWindowListener(LookWindowListener())
+        try:
+            self.build_ui()
+            self.apply_preset_by_name(PRESET_NAMES[0])
+        except ANY_ERROR:
+            # The window never opens, so it never closes: put Fiji's look back now.
+            look_restore()
+            raise
         self.setVisible(True)
+        # The first thing with the keyboard focus is the tabs, not the look switch.
+        self.main_tabs.requestFocusInWindow()
 
     # ----- UI construction ----------------------------------------------------
 
     def build_ui(self):
-        root = JPanel(BorderLayout(8, 8))
-        root.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8))
-
-        header = JPanel(BorderLayout())
-        title = JLabel(APP_NAME + "  " + APP_VERSION)
-        title.setFont(Font("SansSerif", Font.BOLD, 18))
-        subtitle = JLabel("One Fiji application for channel preparation, independent masks, ROI measurements, object quantification, batches, and validation")
-        subtitle.setFont(Font("SansSerif", Font.PLAIN, 12))
-        header.add(title, BorderLayout.NORTH)
-        header.add(subtitle, BorderLayout.SOUTH)
-        root.add(header, BorderLayout.NORTH)
+        self.build_status_widgets()
+        root = JPanel(BorderLayout(0, 0))
+        root.add(self.build_header(), BorderLayout.NORTH)
 
         self.main_tabs = JTabbedPane()
+        self.main_tabs.putClientProperty("JTabbedPane.tabAreaAlignment", "center")
+        self.main_tabs.putClientProperty("JTabbedPane.showContentSeparator", True)
         self.main_tabs.add("Session", self.build_session_tab())
+        self.main_tabs.add(RESULTS_TAB_TITLE, self.build_results_tab())
         self.main_tabs.add("Channels", self.build_channels_tab())
         self.main_tabs.add("ROIs and output", self.build_roi_output_tab())
         self.main_tabs.add("Batch", self.build_batch_tab())
@@ -580,197 +3526,536 @@ class CellQuantStudioUniversal(JFrame):
         if len(SETTINGS_FORMS) > 0:
             self.main_tabs.add("Analyses", self.build_analyses_tab())
         self.main_tabs.add("Help", self.build_help_tab())
-        root.add(self.main_tabs, BorderLayout.CENTER)
+        self.main_tabs.addChangeListener(SessionShownListener(self))
+        body = JPanel(BorderLayout(0, 0))
+        body.add(self.main_tabs, BorderLayout.CENTER)
+        body.add(self.build_log_drawer(), BorderLayout.SOUTH)
+        root.add(body, BorderLayout.CENTER)
         root.add(self.build_job_bar(), BorderLayout.SOUTH)
 
         self.getContentPane().add(root)
+        self.style_buttons(root)
+        tidy_tab(root)
+        self.append_status("Ready.")
 
-    def build_job_bar(self):
-        """The strip under the tabs that shows a background job (an analysis,
-        a validation, a sensitivity, tuning, tissue, count correction or
-        robustness run) and lets the user cancel it."""
-        bar = JPanel(FlowLayout(FlowLayout.LEFT))
-        self.job_label = JLabel("No background job is running.")
-        self.job_progress = JProgressBar(0, 100)
-        self.job_progress.setStringPainted(True)
-        self.job_progress.setString("Idle")
-        self.job_progress.setPreferredSize(Dimension(320, 20))
-        self.job_cancel_button = JButton("Cancel", actionPerformed=self.cancel_background_action)
-        self.job_cancel_button.setEnabled(False)
-        bar.add(self.job_progress)
-        bar.add(self.job_cancel_button)
-        bar.add(self.job_label)
-        return bar
-
-    def add_grid_row(self, panel, row, label_text, component, button=None):
-        gbc = GridBagConstraints()
-        gbc.gridx = 0
-        gbc.gridy = row
-        gbc.anchor = GridBagConstraints.WEST
-        gbc.insets = Insets(4, 6, 4, 6)
-        panel.add(JLabel(label_text), gbc)
-
-        gbc = GridBagConstraints()
-        gbc.gridx = 1
-        gbc.gridy = row
-        gbc.weightx = 1.0
-        gbc.fill = GridBagConstraints.HORIZONTAL
-        gbc.insets = Insets(4, 6, 4, 6)
-        panel.add(component, gbc)
-
-        if button is not None:
-            gbc = GridBagConstraints()
-            gbc.gridx = 2
-            gbc.gridy = row
-            gbc.insets = Insets(4, 6, 4, 6)
-            panel.add(button, gbc)
-
-    def build_session_tab(self):
-        panel = JPanel(BorderLayout(8, 8))
-
-        inputs = JPanel(GridBagLayout())
-        inputs.setBorder(BorderFactory.createTitledBorder("Input and workflow"))
-        self.image_path_field = JTextField("", 60)
-        self.output_dir_field = JTextField("", 60)
-        self.preset_combo = JComboBox(PRESET_NAMES)
-        self.frame_mode_combo = JComboBox(FRAME_MODES)
-
-        self.add_grid_row(
-            inputs, 0, "Image file", self.image_path_field,
-            JButton("Browse", actionPerformed=self.choose_image_file)
-        )
-        self.add_grid_row(
-            inputs, 1, "Output folder", self.output_dir_field,
-            JButton("Browse", actionPerformed=self.choose_output_dir)
-        )
-        self.add_grid_row(
-            inputs, 2, "Analysis preset", self.preset_combo,
-            JButton("Apply preset", actionPerformed=self.apply_selected_preset)
-        )
-        self.add_grid_row(inputs, 3, "Frames", self.frame_mode_combo)
-
-        actions = JPanel(FlowLayout(FlowLayout.LEFT))
-        actions.setBorder(BorderFactory.createTitledBorder("Workflow actions"))
-        actions.add(JButton("Open selected image", actionPerformed=self.open_selected_image))
-        actions.add(JButton("Open via Bio-Formats", actionPerformed=self.open_selected_with_bioformats))
-        actions.add(JButton("Use active image", actionPerformed=self.use_active_image))
-        actions.add(JButton("1. Prepare enabled channels", actionPerformed=self.prepare_enabled_channels))
-        actions.add(JButton("2. Preview all masks", actionPerformed=self.preview_all_masks))
-        actions.add(JButton("3. Run analysis", actionPerformed=self.run_analysis_action))
-        actions.add(JButton("Quick run", actionPerformed=self.quick_run_action))
-        actions.add(JButton("Reset for next image", actionPerformed=self.reset_for_next_image))
-
-        self.drop_area = JTextArea()
-        self.drop_area.setEditable(False)
-        self.drop_area.setLineWrap(True)
-        self.drop_area.setWrapStyleWord(True)
-        self.drop_area.setFont(Font("SansSerif", Font.PLAIN, 15))
-        self.drop_area.setText(
-            "Drop one microscopy image here.\n\n"
-            "Recommended manual-threshold workflow:\n"
-            "1. Open an image and apply a preset.\n"
-            "2. Prepare the enabled channels.\n"
-            "3. Use each channel's Brightness/Contrast button.\n"
-            "4. Preview masks and adjust thresholds/morphology.\n"
-            "5. Load or draw parent ROIs.\n"
-            "6. Run analysis."
-        )
-        self.drop_area.setBorder(BorderFactory.createTitledBorder("Drag and drop"))
-        DropTarget(self.drop_area, FileDropTarget(self))
-
-        self.image_info_area = JTextArea()
-        self.image_info_area.setEditable(False)
-        self.image_info_area.setLineWrap(True)
-        self.image_info_area.setWrapStyleWord(True)
-        self.image_info_area.setText("No source image selected.")
-        self.image_info_area.setBorder(BorderFactory.createTitledBorder("Source image"))
-
-        center = JSplitPane(
-            JSplitPane.HORIZONTAL_SPLIT,
-            JScrollPane(self.drop_area),
-            JScrollPane(self.image_info_area)
-        )
-        center.setResizeWeight(0.45)
-
+    def build_status_widgets(self):
+        """The run log and the status line, made first: messages can arrive
+        while the tabs are built."""
         self.status_area = JTextArea()
         self.status_area.setEditable(False)
         self.status_area.setLineWrap(True)
         self.status_area.setWrapStyleWord(True)
-        self.status_area.setFont(Font("Monospaced", Font.PLAIN, 11))
-        self.status_area.setBorder(BorderFactory.createTitledBorder("Status and run log"))
-        self.append_status("Ready.")
+        self.status_area.setFont(look_mono_font(12))
+        self.status_area.setBorder(BorderFactory.createEmptyBorder(8, 10, 8, 10))
+        # The one status line of the window: the latest message of the run log.
+        self.job_label = JLabel("Ready.")
+        self.job_label.setFont(look_font("ui", 12))
+        set_style(self.job_label, "foreground: $Label.disabledForeground")
+        self.warning_count = 0
+        # A long message is shortened with "..." here; it is whole in the run log.
+        self.job_label.putClientProperty("cellquant.elides", "yes")
 
-        top = JPanel(BorderLayout(6, 6))
-        top.add(inputs, BorderLayout.NORTH)
-        top.add(actions, BorderLayout.SOUTH)
+    def build_header(self):
+        """The title row: the name, what the tool does and its version, and
+        the Light | Dark | Fiji switch."""
+        header = JPanel(BorderLayout(16, 0))
+        header.setBorder(BorderFactory.createEmptyBorder(12, 28, 2, 24))
+        words = JPanel()
+        words.setLayout(BoxLayout(words, BoxLayout.Y_AXIS))
+        words.setOpaque(False)
+        title = JLabel(APP_NAME)
+        title.setFont(look_font("title", 22))
+        subtitle = JLabel(
+            "Reproducible cell counts and marker measurements in fluorescence microscopy images.   Version " + APP_VERSION
+        )
+        subtitle.setFont(look_font("ui", 13))
+        subtitle.putClientProperty("FlatLaf.style", "foreground: $Label.disabledForeground")
+        words.add(title)
+        words.add(Box.createVerticalStrut(2))
+        words.add(subtitle)
+        self.look_switch = Segmented(LOOK_NAMES, look_preference(), self.set_look, LOOK_SHORT_NAMES)
+        self.look_switch.buttons[LOOK_LIGHT].setToolTipText(
+            "Light look for this window, and for the rest of Fiji while it is open. The choice is remembered."
+        )
+        self.look_switch.buttons[LOOK_DARK].setToolTipText(
+            "Dark look for this window, and for the rest of Fiji while it is open. The choice is remembered."
+        )
+        self.look_switch.buttons[LOOK_FIJI].setToolTipText(
+            "Fiji default: leave Fiji's own look alone. The choice is remembered."
+        )
+        # The name the tests and scripts of version 2.3.0 used for the choice.
+        self.look_combo = self.look_switch
+        side = JPanel(GridBagLayout())
+        side.setOpaque(False)
+        side.add(self.look_switch)
+        header.add(words, BorderLayout.CENTER)
+        header.add(side, BorderLayout.EAST)
+        return header
 
-        split = JSplitPane(JSplitPane.VERTICAL_SPLIT, center, JScrollPane(self.status_area))
-        split.setResizeWeight(0.57)
+    @ui_action
+    def set_look(self, name):
+        """Show the window (and, while it is open, the rest of Fiji) in the
+        Light or the Dark look, or leave Fiji's own look (Fiji default). The
+        choice is remembered."""
+        name = to_text(name)
+        if name not in LOOK_NAMES:
+            name = LOOK_LIGHT
+        try:
+            Prefs.set(LOOK_PREF_KEY, name)
+        except ANY_ERROR:
+            pass
+        if name == LOOK_FIJI:
+            look_restore()
+        else:
+            look_install(name)
+        self.look_switch.choose(name)
+        # Every kept style (filled buttons, links, segments) takes the
+        # colors of the new look.
+        restyle_tree(self.getContentPane())
+        self.getContentPane().revalidate()
+        self.repaint()
 
-        panel.add(top, BorderLayout.NORTH)
-        panel.add(split, BorderLayout.CENTER)
+    def color_buttons(self, container):
+        """Give every filled button (and every other kept style) the colors
+        of the look in use."""
+        restyle_tree(container)
+
+    def style_buttons(self, container):
+        """Give every button that has no style of its own yet the plain style."""
+        for child in container.getComponents():
+            if isinstance(child, JButton):
+                if child.getClientProperty("FlatLaf.style") is None:
+                    style_button(child)
+            elif hasattr(child, "getComponents"):
+                self.style_buttons(child)
+
+    def build_results_tab(self):
+        """The latest analysis as a picture: headline numbers, the organoid
+        map of the parent ROIs, and the picture of the run. The tables and
+        files of the run are unchanged; this only shows them."""
+        panel = JPanel(BorderLayout(0, 0))
+        self.results_canvas = ResultsCanvas()
+        self.results_canvas.on_run = self.run_analysis_action
+        self.results_caption = JLabel("The latest analysis is shown here.")
+        self.results_caption.setFont(look_font("ui_semibold", 13))
+        self.results_folder_note = WrapNote("", 12, True, True)
+        self.results_folder_note.setVisible(False)
+        words = JPanel(BorderLayout(0, 2))
+        words.add(self.results_caption, BorderLayout.NORTH)
+        words.add(self.results_folder_note, BorderLayout.CENTER)
+        bar = JPanel(BorderLayout(16, 0))
+        bar.setBorder(BorderFactory.createEmptyBorder(14, 28, 4, 24))
+        bar.add(words, BorderLayout.CENTER)
+        bar.add(button_row([JButton("Show result files", actionPerformed=self.open_last_output_folder)]), BorderLayout.EAST)
+        panel.add(bar, BorderLayout.NORTH)
+        panel.add(self.results_canvas, BorderLayout.CENTER)
         return panel
 
-    def build_channels_tab(self):
-        panel = JPanel(BorderLayout(6, 6))
-        note = JTextArea(
-            "Configure each physical channel independently. Positive-area and object measurements are always based on that channel's own mask. "
+    def show_results(self, result, configs, run_dir, source_title="", pictures=None):
+        """Event thread: fill the Results tab from a finished analysis and
+        bring it to the front. A failure here never fails the analysis.
 
+        pictures: what results_pictures() returned for this run, built
+        beforehand on the worker thread (it takes seconds for a large image
+        and must not freeze the window); None builds it here."""
+        try:
+            self.results_canvas.data = results_from_summary(result["summary_headers"], result["summary_rows"], configs)
+            self.results_canvas.pictures = results_pictures(run_dir, configs) if pictures is None else pictures
+            # Regions differ in size: the rings first show densities, which
+            # can be compared between regions, when the run has them.
+            self.results_canvas.metric = default_ring_metric(self.results_canvas.data)
+            self.results_canvas.zoom = False
+            regions = self.results_canvas.data["regions"]
+            dot = u"  " + MIDDLE_DOT + u"  "
+            self.results_caption.setText(
+                to_text(source_title) + dot + str(regions) + (" region" if regions == 1 else " regions") +
+                dot + time.strftime("%d %b %Y, %H:%M")
+            )
+            self.results_folder_note.setText("Saved in " + to_text(run_dir))
+            self.results_folder_note.setVisible(True)
+            if self.results_animation is not None:
+                self.results_animation.timer.stop()
+            self.results_canvas.progress = 0.0
+            self.results_animation = ResultsAnimation(self.results_canvas)
+            self.results_animation.timer.start()
+            self.main_tabs.setSelectedIndex(self.main_tabs.indexOfTab(RESULTS_TAB_TITLE))
+        except ANY_ERROR as exc:
+            self.append_status("The Results tab could not be filled: " + to_text(exc))
+
+    def build_log_drawer(self):
+        """The run log: every status message with its time, under the tabs.
+        Hidden until "Show run log" is pressed."""
+        drawer = JPanel(BorderLayout(0, 0))
+        drawer.setBorder(BorderFactory.createEmptyBorder(8, PAGE_PAD, 0, PAGE_PAD))
+        card = Card("Run log", grow=True)
+        self.status_area.setOpaque(False)
+        scroll = LogScroll(self.status_area, self)
+        scroll.setBorder(BorderFactory.createEmptyBorder())
+        scroll.setOpaque(False)
+        scroll.getViewport().setOpaque(False)
+        grid_add(card, scroll, 0, form_next_row(card), width=3, weightx=1.0, weighty=1.0, fill=GridBagConstraints.BOTH)
+        drawer.add(card, BorderLayout.CENTER)
+        drawer.setVisible(False)
+        self.log_drawer = drawer
+        return drawer
+
+    def toggle_run_log(self, event=None):
+        showing = not self.log_drawer.isVisible()
+        self.log_drawer.setVisible(showing)
+        self.log_button.setText("Hide run log" if showing else "Show run log")
+        if self.warning_count > 0:
+            # The warnings are read now: the button is a plain link again.
+            self.warning_count = 0
+            set_style(self.log_button, BUTTON_STYLES["quiet"])
+        self.getContentPane().revalidate()
+        self.repaint()
+
+    def build_job_bar(self):
+        """The status line at the bottom of the window, and the progress and
+        Cancel button of a background job (an analysis, a validation, a
+        sensitivity, tuning, tissue, count correction or robustness run)."""
+        # The progress bar and the Cancel button appear only while a job
+        # runs (JobBarWatcher follows the button, which every job enables).
+        bar = JPanel(BorderLayout(12, 0))
+        bar.setBorder(BorderFactory.createEmptyBorder(6, 28, 8, 18))
+        self.job_progress = JProgressBar(0, 100)
+        # The string is still set, for scripts and tests that read the state.
+        self.job_progress.setStringPainted(False)
+        self.job_progress.setString("Idle")
+        self.job_progress.setPreferredSize(Dimension(220, 6))
+        self.job_cancel_button = style_button(JButton("Cancel", actionPerformed=self.cancel_background_action), "danger")
+        self.job_cancel_button.setEnabled(False)
+        self.log_button = style_button(JButton("Show run log", actionPerformed=self.toggle_run_log), "quiet")
+        self.job_side = JPanel(FlowLayout(FlowLayout.RIGHT, 8, 0))
+        self.job_side.add(self.job_progress)
+        self.job_side.add(self.job_cancel_button)
+        self.job_side.add(self.log_button)
+        self.job_progress.setVisible(False)
+        self.job_cancel_button.setVisible(False)
+        self.job_cancel_button.addPropertyChangeListener("enabled", JobBarWatcher(self))
+        bar.add(self.job_label, BorderLayout.CENTER)
+        bar.add(self.job_side, BorderLayout.EAST)
+        return bar
+
+    def add_grid_row(self, panel, row, label_text, component, button=None):
+        """A form row of the tab being built (row is kept for older callers;
+        a form numbers its rows itself). button may also be a short hint."""
+        form_row(panel, getattr(self, "form_labels", None), label_text, component, button)
+
+    # ----- Session tab --------------------------------------------------------
+
+    def build_session_tab(self):
+        """The starting point: on the left the source image (a place to drop
+        it, then a small picture, its summary and its channels); on the
+        right where the image and the results are, then the three steps."""
+        self.image_path_field = JTextField("", 60)
+        self.output_dir_field = JTextField("", 60)
+        self.preset_combo = JComboBox(PRESET_NAMES)
+        self.preset_combo.putClientProperty("cellquant.wide", "yes")
+        self.frame_mode_combo = JComboBox(FRAME_MODES)
+        for field in [self.image_path_field, self.output_dir_field]:
+            field.getDocument().addDocumentListener(TipFollower(field))
+        self.preset_combo.addActionListener(ComboTipFollower(self.preset_combo))
+        self.preset_combo.setToolTipText(to_text(self.preset_combo.getSelectedItem()))
+        self.form_labels = form_group()
+        columns = JPanel(ShareLayout(0.54, GAP))
+        columns.setOpaque(False)
+        columns.add(self.build_image_card())
+        columns.add(page_scroll(stack([self.build_setup_card(), self.build_steps_card()]), 10000, 0))
+        return page_fill(columns, SESSION_WIDTH)
+
+    def build_image_card(self):
+        """Source image: a place to drop a file until an image is chosen;
+        then a small picture beside its summary, and its channels."""
+        card = Card("Source image", grow=True)
+        self.drop_area = DropZonePanel()
+        self.drop_area.setToolTipText(
+            "Recommended manual-threshold workflow: open an image and apply a preset; prepare the enabled channels; "
+            "use each channel's Brightness/Contrast button; preview masks and adjust thresholds/morphology; "
+            "load or draw parent ROIs; run the analysis."
+        )
+        self.source_preview = PreviewPanel()
+        self.source_preview.setPreferredSize(Dimension(PREVIEW_SIDE, PREVIEW_SIDE))
+        self.source_preview.setMinimumSize(Dimension(PREVIEW_SIDE, PREVIEW_SIDE))
+        self.image_stage = JPanel(CardLayout())
+        self.image_stage.setOpaque(False)
+        self.image_stage.add(self.drop_area, "drop")
+        self.image_stage.add(page_scroll(self.build_loaded_image(), 10000, 0), "preview")
+        self.image_stage.setPreferredSize(Dimension(420, 260))
+        self.image_stage.setMinimumSize(Dimension(240, 120))
+        for target in [self.drop_area, self.source_preview]:
+            DropTarget(target, FileDropTarget(self))
+        grid_add(card, self.image_stage, 0, form_next_row(card), width=3, weightx=1.0, weighty=1.0,
+                 fill=GridBagConstraints.BOTH, insets=Insets(0, 0, 8, 0))
+        # The whole description as text, for scripts; the card shows it as a summary.
+        self.image_info_area = JTextArea("No source image selected.")
+        form_wide(card, button_row([
+            style_button(JButton("Use active image", actionPerformed=self.use_active_image), "quiet"),
+            style_button(JButton("Reset for next image", actionPerformed=self.reset_for_next_image), "quiet")
+        ], LINK_GAP), 0, 0)
+        return card
+
+    def build_loaded_image(self):
+        """The picture and summary of the source image side by side, and
+        under them its channels."""
+        panel = JPanel(GridBagLayout())
+        panel.setOpaque(False)
+        grid_add(panel, self.source_preview, 0, 0, anchor=GridBagConstraints.NORTHWEST, insets=Insets(0, 0, 0, GAP))
+        grid_add(panel, self.build_image_summary(), 1, 0, weightx=1.0, fill=GridBagConstraints.HORIZONTAL,
+                 anchor=GridBagConstraints.NORTHWEST)
+        heading = JLabel("Channels")
+        heading.setFont(look_font("ui_semibold", 13))
+        grid_add(panel, heading, 0, 1, width=2, insets=Insets(GAP, 0, 4, 0))
+        self.channel_list = JPanel(GridBagLayout())
+        self.channel_list.setOpaque(False)
+        grid_add(panel, self.channel_list, 0, 2, width=2, weightx=1.0, fill=GridBagConstraints.HORIZONTAL)
+        self.channel_warning_note = WrapNote("", 12, False)
+        set_style(self.channel_warning_note, "foreground: $CellQuant.warning")
+        self.channel_warning_note.setVisible(False)
+        grid_add(panel, self.channel_warning_note, 0, 3, width=2, weightx=1.0, fill=GridBagConstraints.HORIZONTAL,
+                 insets=Insets(8, 0, 0, 0))
+        grid_add(panel, Box.createVerticalGlue(), 0, 4, width=2, weighty=1.0, fill=GridBagConstraints.VERTICAL)
+        self.source_channels = []
+        self.channel_info_token = None
+        return panel
+
+    def build_image_summary(self):
+        """Name, size in pixels and in units, channels, Z, frames, bit depth,
+        pixel size, position and path of the source image."""
+        panel = JPanel(GridBagLayout())
+        panel.setOpaque(False)
+        self.summary_values = {}
+        self.summary_empty = WrapNote("No source image selected.", 13)
+        grid_add(panel, self.summary_empty, 0, 0, width=2, weightx=1.0, fill=GridBagConstraints.HORIZONTAL)
+        for row_index in range(len(SUMMARY_ROWS)):
+            title, key = SUMMARY_ROWS[row_index]
+            caption = JLabel(title)
+            caption.setFont(look_font("ui", 12))
+            caption.putClientProperty("FlatLaf.style", "foreground: $Label.disabledForeground")
+            value = WrapNote("", 13, False, key != "warning")
+            if key == "warning":
+                set_style(value, "foreground: $CellQuant.danger")
+            self.summary_values[key] = (caption, value)
+            grid_add(panel, caption, 0, row_index + 1, anchor=GridBagConstraints.NORTHWEST, insets=Insets(3, 0, 3, 12))
+            grid_add(panel, value, 0 if key == "warning" else 1, row_index + 1, width=2 if key == "warning" else 1, weightx=1.0,
+                     fill=GridBagConstraints.HORIZONTAL, anchor=GridBagConstraints.NORTHWEST, insets=Insets(3, 0, 3, 0))
+        self.show_image_summary(None)
+        return panel
+
+    def show_image_summary(self, values):
+        """values: text per key of the summary, or None when there is no image."""
+        self.summary_empty.setVisible(values is None)
+        for key in self.summary_values:
+            caption, value = self.summary_values[key]
+            text = "" if values is None else to_text(values.get(key, ""))
+            value.setText(text)
+            caption.setVisible(text != "")
+            value.setVisible(text != "")
+
+    def build_steps_card(self):
+        """The three steps of an analysis, the last one filled; Quick run under them."""
+        card = Card("Analysis")
+        steps = [
+            ("1 Prepare channels", self.prepare_enabled_channels, "plain",
+             "Z projection, background and filters, per channel"),
+            ("2 Preview masks", self.preview_all_masks, "plain",
+             "Check the mask of every channel before measuring"),
+            ("3 Analyse", self.run_analysis_action, "primary",
+             "Measure in the parent ROIs, save tables and images")
+        ]
+        for text, handler, kind, caption in steps:
+            row = form_next_row(card)
+            grid_add(card, style_button(JButton(text, actionPerformed=handler), kind), 0, row,
+                     fill=GridBagConstraints.HORIZONTAL, insets=Insets(4, 0, 4, GAP))
+            grid_add(card, WrapNote(caption, 12), 1, row, width=2, weightx=1.0,
+                     fill=GridBagConstraints.HORIZONTAL, insets=Insets(4, 0, 4, 0))
+        form_wide(card, JSeparator(), 8, 4)
+        row = form_next_row(card)
+        quick = style_button(JButton("Quick run", actionPerformed=self.quick_run_action), "quiet")
+        quick.setToolTipText("Prepares and analyses in one step, without the mask preview. Not for Display-minimum thresholds.")
+        grid_add(card, quick, 0, row, insets=Insets(2, 0, 2, GAP))
+        grid_add(card, WrapNote("Prepare and analyse in one step, no preview", 12), 1, row, width=2, weightx=1.0,
+                 fill=GridBagConstraints.HORIZONTAL, insets=Insets(2, 0, 2, 0))
+        return card
+
+    def build_setup_card(self):
+        """Where the image comes from and where the results go, and the
+        preset and frames: what to set before the first step."""
+        card = Card("Setup")
+        self.add_grid_row(card, 0, "Image file", self.image_path_field, JButton("Browse", actionPerformed=self.choose_image_file))
+        form_under(card, button_row([
+            style_button(JButton("Open selected image", actionPerformed=self.open_selected_image), "quiet"),
+            style_button(JButton("Open via Bio-Formats", actionPerformed=self.open_selected_with_bioformats), "quiet")
+        ], LINK_GAP), 4)
+        self.add_grid_row(card, 1, "Output folder", self.output_dir_field,
+                          JButton("Browse", actionPerformed=self.choose_output_dir))
+        form_under(card, WrapNote("Each analysis makes a new run folder inside it.", 12), ROW_GAP + 3)
+        self.add_grid_row(card, 2, "Analysis preset", self.preset_combo,
+                          style_button(JButton("Apply preset", actionPerformed=self.apply_selected_preset), "quiet"))
+        self.add_grid_row(card, 3, "Frames", self.frame_mode_combo)
+        return card
+
+    # ----- the channels of the source image -----
+
+    def read_source_channels(self):
+        """Event thread: list the channels of the new source image at once
+        (from the open image), then complete the list from the file's
+        metadata on a worker thread when the image came from a file."""
+        imp = self.source_imp
+        token = object()
+        self.channel_info_token = token
+        basics = image_channel_basics(imp)
+        self.source_channels = basics
+        self.refresh_channel_list()
+        path = to_text(self.source_path or "")
+        if imp is None or path == "" or not os.path.isfile(path):
+            return
+        count = imp.getNChannels()
+        title = to_text(imp.getTitle())
+        window = self
+
+        def work():
+            try:
+                found = read_channel_metadata(path, count, title)
+            except ANY_ERROR:
+                found = None
+
+            def done():
+                if window.channel_info_token is token and found is not None:
+                    window.source_channels = merge_channel_info(basics, found)
+                    window.refresh_channel_list()
+            run_on_ui(done)
+        reader = threading.Thread(target=work, name="Cell Quant Studio channel metadata")
+        reader.setDaemon(True)
+        reader.start()
+
+    def title_channel_tab(self, channel):
+        """The tab of a channel says its number and its name: "C1 DAPI".
+        The default name (Channel_1) adds nothing and is left out."""
+        panel = self.channel_panels[channel - 1]
+        name = text_value(panel.name_field)
+        title = "C" + str(channel)
+        if name != "" and name != "Channel_" + str(channel):
+            title = title + " " + (name if len(name) <= CHANNEL_TITLE_LIMIT else name[:CHANNEL_TITLE_LIMIT - 1] + "...")
+        self.channel_tabs.setTitleAt(channel - 1, title)
+        self.channel_tabs.setToolTipTextAt(channel - 1, "Channel " + str(channel) + (": " + name if name != "" else ""))
+
+    def channel_settings_by_number(self):
+        """Channel number -> {"name", "enabled", "mode"} as set in the window."""
+        settings = {}
+        for panel in self.channel_panels:
+            try:
+                config = panel.get_config()
+            except ANY_ERROR:
+                continue
+            settings[panel.channel_number] = {
+                "name": to_text(config.get("name", "")), "enabled": bool(config.get("enabled")),
+                "mode": to_text(config.get("analysis_mode", ""))
+            }
+        return settings
+
+    def refresh_channel_list(self, event=None):
+        """Event thread: show every channel of the source image, what the
+        file says about it and what this window will do with it, and the
+        names that contradict the file."""
+        if getattr(self, "channel_list", None) is None:
+            return
+        self.channel_list.removeAll()
+        settings = self.channel_settings_by_number()
+        infos = getattr(self, "source_channels", []) or []
+        for caption, column in [("In the file", 2), ("In this window", 3)]:
+            words = JLabel(caption)
+            words.setFont(look_font("ui", 12))
+            words.putClientProperty("FlatLaf.style", "foreground: $Label.disabledForeground")
+            grid_add(self.channel_list, words, column, 0, insets=Insets(0, 0, 2, 12))
+        for index in range(len(infos)):
+            info = infos[index]
+            number = info["channel"]
+            grid_add(self.channel_list, ColorDot(channel_display_color(info)), 0, index + 1,
+                     insets=Insets(4, 0, 4, 8))
+            name = JLabel("C" + str(number))
+            name.setFont(look_font("ui_semibold", 13))
+            grid_add(self.channel_list, name, 1, index + 1, insets=Insets(3, 0, 3, 12))
+            grid_add(self.channel_list, WrapNote(channel_file_text(info), 13, False), 2, index + 1, weightx=1.0,
+                     fill=GridBagConstraints.HORIZONTAL, anchor=GridBagConstraints.NORTHWEST, insets=Insets(3, 0, 3, 12))
+            own = settings.get(number)
+            if own is None:
+                configured = "-"
+            elif not own["enabled"]:
+                configured = "not used"
+            else:
+                configured = own["name"] + ", " + own["mode"]
+            grid_add(self.channel_list, WrapNote(configured, 13, own is None or not own["enabled"]), 3, index + 1,
+                     weightx=1.0, fill=GridBagConstraints.HORIZONTAL, anchor=GridBagConstraints.NORTHWEST,
+                     insets=Insets(3, 0, 3, 0))
+        warnings = channel_name_warnings(infos, settings)
+        self.channel_warning_note.setText("\n".join(warnings))
+        self.channel_warning_note.setVisible(len(warnings) > 0)
+        self.channel_list.revalidate()
+        self.channel_list.repaint()
+
+    def channel_list_lines(self):
+        """The channel list as text, one line per channel (for scripts and tests)."""
+        settings = self.channel_settings_by_number()
+        lines = []
+        for info in getattr(self, "source_channels", []) or []:
+            own = settings.get(info["channel"])
+            configured = "-" if own is None else ("not used" if not own["enabled"] else own["name"] + ", " + own["mode"])
+            lines.append("C" + str(info["channel"]) + ": " + channel_file_text(info) + " | " + configured)
+        return lines
+
+    # ----- Channels tab -------------------------------------------------------
+
+    def build_channels_tab(self):
+        note = make_note(
+            "Configure each physical channel independently. Positive-area and object measurements are always based on that channel's own mask. "
             "Object ROIs are transferred to other channels only when the explicit cross-channel option is enabled."
         )
-        note.setEditable(False)
-        note.setLineWrap(True)
-        note.setWrapStyleWord(True)
-        note.setOpaque(False)
-        note.setBorder(BorderFactory.createEmptyBorder(4, 6, 4, 6))
-
         self.channel_tabs = JTabbedPane()
         for channel_number in range(1, MAX_CHANNELS + 1):
             channel_panel = ChannelSettingsPanel(self, channel_number)
             self.channel_panels.append(channel_panel)
-            self.channel_tabs.add("C" + str(channel_number), JScrollPane(channel_panel))
+            self.channel_tabs.add("C" + str(channel_number), channel_panel)
+            channel_panel.name_field.getDocument().addDocumentListener(ChannelTitleFollower(self, channel_number))
+        column = JPanel(BorderLayout(0, 10))
+        column.setOpaque(False)
+        column.add(note, BorderLayout.NORTH)
+        column.add(self.channel_tabs, BorderLayout.CENTER)
+        return page_fill(column, PAGE_WIDTH)
 
-        panel.add(note, BorderLayout.NORTH)
-        panel.add(self.channel_tabs, BorderLayout.CENTER)
-        return panel
+    # ----- ROIs and output tab ------------------------------------------------
 
     def build_roi_output_tab(self):
-        outer = JPanel()
-        outer.setLayout(BoxLayout(outer, BoxLayout.Y_AXIS))
-
-        roi_panel = JPanel(GridBagLayout())
-        roi_panel.setBorder(BorderFactory.createTitledBorder("Parent ROI source"))
+        self.form_labels = form_group()
+        roi_panel = Card("Parent ROI source")
         self.roi_source_combo = JComboBox(ROI_SOURCES)
         self.roi_source_combo.setSelectedItem("ROI Manager")
         self.add_grid_row(roi_panel, 0, "Quantification region", self.roi_source_combo)
+        form_under(roi_panel, button_row([
+            JButton("Open ROI Manager", actionPerformed=self.open_roi_manager),
+            JButton("Load ROI set", actionPerformed=self.load_roi_set),
+            JButton("Add current ROI", actionPerformed=self.add_current_roi),
+            style_button(JButton("Clear ROI Manager", actionPerformed=self.clear_roi_manager), "danger")
+        ]), ROW_GAP)
 
-        roi_buttons = JPanel(FlowLayout(FlowLayout.LEFT))
-        roi_buttons.add(JButton("Open ROI Manager", actionPerformed=self.open_roi_manager))
-        roi_buttons.add(JButton("Load ROI set", actionPerformed=self.load_roi_set))
-        roi_buttons.add(JButton("Add current ROI", actionPerformed=self.add_current_roi))
-        roi_buttons.add(JButton("Clear ROI Manager", actionPerformed=self.clear_roi_manager))
-        gbc = GridBagConstraints()
-        gbc.gridx = 0
-        gbc.gridy = 1
-        gbc.gridwidth = 3
-        gbc.weightx = 1.0
-        gbc.fill = GridBagConstraints.HORIZONTAL
-        gbc.insets = Insets(4, 6, 4, 6)
-        roi_panel.add(roi_buttons, gbc)
-
-        calibration_panel = JPanel(GridBagLayout())
-        calibration_panel.setBorder(BorderFactory.createTitledBorder("Spatial calibration"))
+        calibration_panel = Card("Spatial calibration")
         self.override_calibration_cb = JCheckBox("Override source calibration", False)
+        self.override_calibration_cb.actionPerformed = self.calibration_choice_changed
         self.pixel_width_field = JTextField("1.0", 10)
         self.pixel_height_field = JTextField("1.0", 10)
         self.spatial_unit_field = JTextField("pixel", 12)
         self.add_grid_row(calibration_panel, 0, "Use override", self.override_calibration_cb)
-        self.add_grid_row(calibration_panel, 1, "Pixel width", self.pixel_width_field)
-        self.add_grid_row(calibration_panel, 2, "Pixel height", self.pixel_height_field)
-        self.add_grid_row(calibration_panel, 3, "Spatial unit", self.spatial_unit_field)
+        self.pixel_width_hint = form_hint("units per pixel")
+        self.pixel_height_hint = form_hint("units per pixel")
+        self.add_grid_row(calibration_panel, 1, "Pixel width", self.pixel_width_field, self.pixel_width_hint)
+        self.add_grid_row(calibration_panel, 2, "Pixel height", self.pixel_height_field, self.pixel_height_hint)
+        self.spatial_unit_field.getDocument().addDocumentListener(UnitHintFollower(self))
+        self.add_grid_row(calibration_panel, 3, "Spatial unit", self.spatial_unit_field, form_hint("for example micron"))
+        form_under(calibration_panel, WrapNote(
+            "The fields show the calibration of the source image when it is chosen; with the override they replace it for the analysis.", 12
+        ))
 
-        output_panel = JPanel(GridBagLayout())
-        output_panel.setBorder(BorderFactory.createTitledBorder("Saved outputs"))
+        output_panel = Card("Saved outputs")
         self.save_prepared_cb = JCheckBox("Save prepared measurement images", True)
         self.save_masks_cb = JCheckBox("Save raw and final masks", True)
         self.save_parent_rois_cb = JCheckBox("Save input parent ROIs", True)
@@ -784,8 +4069,7 @@ class CellQuantStudioUniversal(JFrame):
         self.add_grid_row(output_panel, 4, "Overlays", self.save_overlays_cb)
         self.add_grid_row(output_panel, 5, "Results display", self.show_summary_cb)
 
-        lifecycle_panel = JPanel(GridBagLayout())
-        lifecycle_panel.setBorder(BorderFactory.createTitledBorder("Image lifecycle"))
+        lifecycle_panel = Card("Image lifecycle")
         self.keep_prepared_open_cb = JCheckBox("Keep prepared images open after analysis", True)
         self.keep_masks_open_cb = JCheckBox("Keep analysis masks open after analysis", True)
         self.close_source_cb = JCheckBox("Close source image after successful analysis", False)
@@ -797,80 +4081,67 @@ class CellQuantStudioUniversal(JFrame):
         self.add_grid_row(lifecycle_panel, 3, "Complete cleanup", self.close_generated_after_cb)
         self.add_grid_row(lifecycle_panel, 4, "Window layout", self.tile_prepared_cb)
 
-        profile_panel = JPanel(FlowLayout(FlowLayout.LEFT))
-        profile_panel.setBorder(BorderFactory.createTitledBorder("Profiles and output access"))
-        profile_panel.add(JButton("Save settings profile", actionPerformed=self.save_profile))
-        profile_panel.add(JButton("Load settings profile", actionPerformed=self.load_profile))
-        profile_panel.add(JButton("Open last output folder", actionPerformed=self.open_last_output_folder))
-        profile_panel.add(JButton("Close generated images", actionPerformed=self.close_generated_images_action))
-        profile_panel.add(JButton("Close all ImageJ images", actionPerformed=self.close_all_images_action))
+        profile_panel = Card("Profiles and output")
+        form_wide(profile_panel, button_row([
+            JButton("Save settings profile", actionPerformed=self.save_profile),
+            JButton("Load settings profile", actionPerformed=self.load_profile),
+            JButton("Open last output folder", actionPerformed=self.open_last_output_folder)
+        ]))
+        form_wide(profile_panel, button_row([
+            JButton("Close generated images", actionPerformed=self.close_generated_images_action),
+            style_button(JButton("Close all ImageJ images", actionPerformed=self.close_all_images_action), "danger")
+        ]), ROW_GAP + 3)
+        return page_scroll(stack([roi_panel, calibration_panel, output_panel, lifecycle_panel, profile_panel]))
 
-        outer.add(roi_panel)
-        outer.add(calibration_panel)
-        outer.add(output_panel)
-        outer.add(lifecycle_panel)
-        outer.add(profile_panel)
-
-        return JScrollPane(outer)
+    # ----- Batch tab ----------------------------------------------------------
 
     def build_batch_tab(self):
-        panel = JPanel(BorderLayout(6, 6))
-        controls = JPanel()
-        controls.setLayout(BoxLayout(controls, BoxLayout.Y_AXIS))
-
-        input_panel = JPanel(GridBagLayout())
-        input_panel.setBorder(BorderFactory.createTitledBorder("Batch input"))
+        self.form_labels = form_group()
+        input_panel = Card("Batch input")
         self.batch_input_field = JTextField("", 60)
         self.batch_extensions_field = JTextField(DEFAULT_BATCH_EXTENSIONS, 60)
         self.batch_recursive_cb = JCheckBox("Include subfolders", False)
         self.batch_force_bioformats_cb = JCheckBox("Always open with Bio-Formats", False)
         self.batch_all_series_cb = JCheckBox("Analyze every series of a multi-series file (otherwise the first series)", False)
-        self.add_grid_row(
-            input_panel, 0, "Input folder", self.batch_input_field,
-            JButton("Browse", actionPerformed=self.choose_batch_input_dir)
-        )
+        self.add_grid_row(input_panel, 0, "Input folder", self.batch_input_field,
+                          JButton("Browse", actionPerformed=self.choose_batch_input_dir))
         self.add_grid_row(input_panel, 1, "File extensions", self.batch_extensions_field)
         self.add_grid_row(input_panel, 2, "Subfolders", self.batch_recursive_cb)
         self.add_grid_row(input_panel, 3, "File opening", self.batch_force_bioformats_cb)
         self.add_grid_row(input_panel, 4, "Series", self.batch_all_series_cb)
 
-        roi_panel = JPanel(GridBagLayout())
-        roi_panel.setBorder(BorderFactory.createTitledBorder("Batch regions"))
+        roi_panel = Card("Batch regions")
         self.batch_roi_combo = JComboBox(BATCH_ROI_POLICIES)
         self.batch_roi_dir_field = JTextField("", 60)
         self.add_grid_row(roi_panel, 0, "Quantification region", self.batch_roi_combo)
-        self.add_grid_row(
-            roi_panel, 1, "ROI folder", self.batch_roi_dir_field,
-            JButton("Browse", actionPerformed=self.choose_batch_roi_dir)
-        )
-        roi_buttons = JPanel(FlowLayout(FlowLayout.LEFT))
-        roi_buttons.add(JButton("Save ROI Manager set for the current image", actionPerformed=self.save_rois_for_current_image))
-        roi_buttons.add(JLabel("Leave the ROI folder empty to look beside each image."))
-        gbc = GridBagConstraints()
-        gbc.gridx = 0
-        gbc.gridy = 2
-        gbc.gridwidth = 3
-        gbc.weightx = 1.0
-        gbc.fill = GridBagConstraints.HORIZONTAL
-        gbc.insets = Insets(4, 6, 4, 6)
-        roi_panel.add(roi_buttons, gbc)
+        self.add_grid_row(roi_panel, 1, "ROI folder", self.batch_roi_dir_field,
+                          JButton("Browse", actionPerformed=self.choose_batch_roi_dir))
+        form_under(roi_panel, WrapNote("Leave the ROI folder empty to look beside each image.", 12), ROW_GAP + 3)
+        form_under(roi_panel, button_row([
+            JButton("Save ROI Manager set for the current image", actionPerformed=self.save_rois_for_current_image)
+        ]))
 
-        actions = JPanel(FlowLayout(FlowLayout.LEFT))
-        actions.setBorder(BorderFactory.createTitledBorder("Batch actions"))
+        actions = Card("Run the batch")
         self.batch_scan_button = JButton("Scan folder", actionPerformed=self.scan_batch_folder)
-        self.batch_run_button = JButton("Run batch", actionPerformed=self.run_batch_action)
-        self.batch_cancel_button = JButton("Cancel batch", actionPerformed=self.cancel_batch_action)
+        self.batch_run_button = style_button(JButton("Run batch", actionPerformed=self.run_batch_action), "primary")
+        self.batch_cancel_button = style_button(JButton("Cancel batch", actionPerformed=self.cancel_batch_action), "danger")
         self.batch_cancel_button.setEnabled(False)
         self.batch_progress = JProgressBar(0, 100)
-        self.batch_progress.setStringPainted(True)
+        # The state is written beside the bar (batch_state_label), which
+        # follows the bar's string; the string is kept for scripts and tests.
+        self.batch_progress.setStringPainted(False)
         self.batch_progress.setString("Idle")
-        self.batch_progress.setPreferredSize(Dimension(420, 22))
-        actions.add(self.batch_scan_button)
-        actions.add(self.batch_run_button)
-        actions.add(self.batch_cancel_button)
-        actions.add(self.batch_progress)
-
-        note = make_note(
+        self.batch_progress.setPreferredSize(Dimension(200, 6))
+        self.batch_progress.setMaximumSize(Dimension(200, 6))
+        self.batch_state_label = JLabel("Idle")
+        self.batch_state_label.setFont(look_font("ui", 12))
+        self.batch_state_label.putClientProperty("FlatLaf.style", "foreground: $Label.disabledForeground")
+        self.batch_state_label.putClientProperty("cellquant.elides", "yes")
+        self.batch_progress.addPropertyChangeListener("string", StringFollower(self.batch_state_label))
+        form_wide(actions, button_row([self.batch_scan_button, self.batch_run_button, self.batch_cancel_button,
+                                       Box.createHorizontalStrut(12), self.batch_progress,
+                                       Box.createHorizontalStrut(10), self.batch_state_label]))
+        form_wide(actions, make_note(
             "A batch applies the channel settings, calibration, and saved-output choices of this window to every image in the folder. "
             "Results go to a new CellQuant_Batch folder inside the output folder chosen on the Session tab (or inside the input folder if none is set). "
             "Each image gets its own run folder; batch_roi_summary.csv, batch_objects.csv, and batch_thresholds.csv combine all images, "
@@ -878,103 +4149,56 @@ class CellQuantStudioUniversal(JFrame):
             "An ROI file is a ROI Manager set saved as <image name>_ROIs.zip (or <image name>.zip / .roi). "
             "Display-minimum thresholds cannot be used in a batch: capture them as Manual thresholds first. "
             "With 'Current frame only' a batch analyzes the first time point of each image."
-        )
+        ), 10, 0)
 
-        controls.add(input_panel)
-        controls.add(roi_panel)
-        controls.add(actions)
-        controls.add(note)
-
+        scan_card = Card("Folder scan")
         self.batch_list_area = JTextArea()
         self.batch_list_area.setEditable(False)
-        self.batch_list_area.setFont(Font("Monospaced", Font.PLAIN, 11))
+        self.batch_list_area.setFont(look_mono_font(12))
+        self.batch_list_area.setBorder(BorderFactory.createEmptyBorder(8, 10, 8, 10))
         self.batch_list_area.setText("Choose an input folder and click Scan folder to list the images a batch would analyze.")
         scan_scroll = JScrollPane(self.batch_list_area)
-        scan_scroll.setBorder(BorderFactory.createTitledBorder("Folder scan"))
+        scan_scroll.setPreferredSize(Dimension(400, 220))
+        form_wide(scan_card, scan_scroll, 0, 0, GridBagConstraints.BOTH)
+        return page_scroll(stack([input_panel, roi_panel, actions, scan_card]))
 
-        panel.add(controls, BorderLayout.NORTH)
-        panel.add(scan_scroll, BorderLayout.CENTER)
-        return panel
+    # ----- Validation and QC tab ----------------------------------------------
 
     def build_validation_tab(self):
-        outer = JPanel()
-        outer.setLayout(BoxLayout(outer, BoxLayout.Y_AXIS))
-
-        channel_panel = JPanel(GridBagLayout())
-        channel_panel.setBorder(BorderFactory.createTitledBorder("Channel under test"))
+        self.form_labels = form_group()
+        channel_panel = Card("Channel under test")
         self.qc_channel_combo = JComboBox(["C" + str(i) for i in range(1, MAX_CHANNELS + 1)])
-        self.add_grid_row(channel_panel, 0, "Channel", self.qc_channel_combo, JLabel("Tested with its current settings, on the current frame, inside the parent ROIs."))
+        self.add_grid_row(channel_panel, 0, "Channel", self.qc_channel_combo,
+                          form_hint("Tested with its current settings, on the current frame, inside the parent ROIs."))
 
-        validation_panel = JPanel(GridBagLayout())
-        validation_panel.setBorder(BorderFactory.createTitledBorder("Validation against manual annotation"))
+        validation_panel = Card("Validation against manual annotation")
         self.annotation_source_combo = JComboBox(ANNOTATION_SOURCES)
         self.annotation_file_field = JTextField("", 60)
         self.add_grid_row(validation_panel, 0, "Annotation", self.annotation_source_combo)
-        self.add_grid_row(
-            validation_panel, 1, "Annotation file", self.annotation_file_field,
-            JButton("Browse", actionPerformed=self.choose_annotation_file)
-        )
-        validation_buttons = JPanel(FlowLayout(FlowLayout.LEFT))
-        validation_buttons.add(JButton("Run validation", actionPerformed=self.run_validation_action))
-        gbc = GridBagConstraints()
-        gbc.gridx = 0
-        gbc.gridy = 2
-        gbc.gridwidth = 3
-        gbc.weightx = 1.0
-        gbc.fill = GridBagConstraints.HORIZONTAL
-        gbc.insets = Insets(4, 6, 4, 6)
-        validation_panel.add(validation_buttons, gbc)
-        gbc = GridBagConstraints()
-        gbc.gridx = 0
-        gbc.gridy = 3
-        gbc.gridwidth = 3
-        gbc.weightx = 1.0
-        gbc.fill = GridBagConstraints.HORIZONTAL
-        gbc.insets = Insets(4, 6, 4, 6)
-        validation_panel.add(make_note(
+        self.add_grid_row(validation_panel, 1, "Annotation file", self.annotation_file_field,
+                          JButton("Browse", actionPerformed=self.choose_annotation_file))
+        form_under(validation_panel, button_row([JButton("Run validation", actionPerformed=self.run_validation_action)]), ROW_GAP)
+        form_wide(validation_panel, make_note(
             "Object detection: mark one point per object with the Multi-point tool (on the source or a prepared image), or load saved point ROIs. "
             "Each detected object is then scored inside every parent ROI: an object containing a mark is a true positive, an object without one is a false positive, "
             "a mark outside every object is missed, and extra marks inside one object are counted as merged. Precision, recall, F1, and count error are reported. "
             "Positive area: load a reference binary mask of the same size (nonzero = positive) to get Dice, Jaccard, precision, recall, and area difference. "
             "Results are saved in a CellQuant_Validation folder with a color-coded overlay (green = matched, orange = merged, red = false positive, magenta = missed mark)."
-        ), gbc)
+        ), 10, 0)
 
-        sensitivity_panel = JPanel(GridBagLayout())
-        sensitivity_panel.setBorder(BorderFactory.createTitledBorder("Parameter sensitivity"))
+        sensitivity_panel = Card("Parameter sensitivity")
         self.sensitivity_parameter_combo = JComboBox(SENSITIVITY_PARAMETERS)
         self.sensitivity_factors_field = JTextField(DEFAULT_SENSITIVITY_FACTORS, 40)
         self.add_grid_row(sensitivity_panel, 0, "Parameter to vary", self.sensitivity_parameter_combo)
-        self.add_grid_row(sensitivity_panel, 1, "Multiply by", self.sensitivity_factors_field, JLabel("comma-separated; 1.0 = the configured value"))
-        sensitivity_buttons = JPanel(FlowLayout(FlowLayout.LEFT))
-        sensitivity_buttons.add(JButton("Run sensitivity analysis", actionPerformed=self.run_sensitivity_action))
-        gbc = GridBagConstraints()
-        gbc.gridx = 0
-        gbc.gridy = 2
-        gbc.gridwidth = 3
-        gbc.weightx = 1.0
-        gbc.fill = GridBagConstraints.HORIZONTAL
-        gbc.insets = Insets(4, 6, 4, 6)
-        sensitivity_panel.add(sensitivity_buttons, gbc)
-        gbc = GridBagConstraints()
-        gbc.gridx = 0
-        gbc.gridy = 3
-        gbc.gridwidth = 3
-        gbc.weightx = 1.0
-        gbc.fill = GridBagConstraints.HORIZONTAL
-        gbc.insets = Insets(4, 6, 4, 6)
-        sensitivity_panel.add(make_note(
+        self.add_grid_row(sensitivity_panel, 1, "Multiply by", self.sensitivity_factors_field,
+                          form_hint("comma-separated factors; 1.0 = the configured value"))
+        form_under(sensitivity_panel, button_row([JButton("Run sensitivity analysis", actionPerformed=self.run_sensitivity_action)]), ROW_GAP)
+        form_wide(sensitivity_panel, make_note(
             "Re-segments the channel while one setting is scaled by each factor and records positive area and object count per parent ROI, "
             "with the percent change from the configured value. This shows how strongly a reported number depends on a threshold or filter choice. "
             "Results are saved as sensitivity.csv in a CellQuant_Sensitivity folder."
-        ), gbc)
-
-        outer.add(channel_panel)
-        outer.add(validation_panel)
-        outer.add(sensitivity_panel)
-        # Keep the three sections at their natural height at the top of the tab.
-        wrapper = JPanel(BorderLayout())
-        wrapper.add(outer, BorderLayout.NORTH)
-        return JScrollPane(wrapper)
+        ), 10, 0)
+        return page_scroll(stack([channel_panel, validation_panel, sensitivity_panel]))
 
     # ----- Analyses tab (settings of the optional analysis modules) ----------
 
@@ -983,29 +4207,23 @@ class CellQuantStudioUniversal(JFrame):
         (SETTINGS_FORMS), in registration order. The controls hold profile
         settings like every other control of the window; the window does no
         checking of its own, the modules' readers report bad values."""
-        outer = JPanel()
-        outer.setLayout(BoxLayout(outer, BoxLayout.Y_AXIS))
-        outer.add(make_note(
+        self.form_labels = None
+        parts = [make_note(
             "Optional analyses loaded beside the engine. These settings are saved in profiles and in the "
             "settings.properties of every run, like all other settings. Analyses that are switched on here "
-            "(for example the depth profile or the threshold spectrum) run inside '3. Run analysis' and batches. "
+            "(for example the depth profile or the threshold spectrum) run inside '3 Analyse' and batches. "
             "The buttons start a separate run in the background; the strip at the bottom of the window shows "
             "its progress and can cancel it."
-        ))
+        )]
         for form in SETTINGS_FORMS:
-            outer.add(self.build_settings_form(form))
-        wrapper = JPanel(BorderLayout())
-        wrapper.add(outer, BorderLayout.NORTH)
-        return JScrollPane(wrapper)
+            parts.append(self.build_settings_form(form))
+        return page_scroll(stack(parts))
 
     def build_settings_form(self, form):
-        panel = JPanel(GridBagLayout())
-        panel.setBorder(BorderFactory.createTitledBorder(to_text(form.get("title", ""))))
+        panel = Card(to_text(form.get("title", "")), stacked=True)
         defaults = default_global_options()
-        row = 0
         if to_text(form.get("note", "")).strip() != "":
-            self.add_wide_row(panel, row, make_note(to_text(form["note"])))
-            row += 1
+            form_wide(panel, make_note(to_text(form["note"])), 0, 6)
         keys = []
         for field in form.get("fields", []):
             key = field[0]
@@ -1014,32 +4232,23 @@ class CellQuantStudioUniversal(JFrame):
             choices = field[3] if len(field) > 3 else None
             if kind == "bool":
                 widget = JCheckBox(label, parse_bool(defaults.get(key), False))
-                self.add_grid_row(panel, row, "", widget)
+                self.add_grid_row(panel, 0, "", widget)
             elif kind == "choice" and choices:
                 widget = JComboBox([to_text(choice) for choice in choices])
                 self.set_choice(widget, defaults.get(key, ""))
-                self.add_grid_row(panel, row, label, widget)
+                self.add_grid_row(panel, 0, label, widget)
             else:
                 kind = "text"
-                widget = JTextField(to_text(defaults.get(key, "")), 20)
-                self.add_grid_row(panel, row, label, widget)
+                value = to_text(defaults.get(key, ""))
+                widget = JTextField(value, 8 if looks_numeric(value) else 20)
+                self.add_grid_row(panel, 0, label, widget)
             self.module_widgets[key] = (kind, widget)
             keys.append(key)
-            row += 1
-        actions = self.module_action_panel(keys)
-        if actions is not None:
-            self.add_wide_row(panel, row, actions)
+        self.module_action_rows(panel, keys)
         return panel
 
     def add_wide_row(self, panel, row, component):
-        gbc = GridBagConstraints()
-        gbc.gridx = 0
-        gbc.gridy = row
-        gbc.gridwidth = 3
-        gbc.weightx = 1.0
-        gbc.fill = GridBagConstraints.HORIZONTAL
-        gbc.insets = Insets(4, 6, 4, 6)
-        panel.add(component, gbc)
+        form_wide(panel, component)
 
     def set_choice(self, combo, value):
         """Select value; a value that is not offered (for example a typing
@@ -1059,54 +4268,53 @@ class CellQuantStudioUniversal(JFrame):
         self.analysis_action_buttons.append(button)
         return button
 
-    def module_action_panel(self, keys):
-        """The button row (and inputs that are not settings) of a form whose
-        module offers a separate run, or None."""
+    def module_action_end(self, panel, button, note):
+        form_wide(panel, button_row([button]), 12, 2)
+        form_wide(panel, WrapNote(note, 12), 2, 0)
+
+    def module_action_rows(self, panel, keys):
+        """The button (and inputs that are not settings) of a form whose
+        module offers a separate run."""
         def has(prefix, function):
             return function in globals() and len([key for key in keys if key.startswith(prefix)]) > 0
 
         if has("tissue_", "detect_tissue_outline"):
-            row = JPanel(FlowLayout(FlowLayout.LEFT))
-            row.add(self.analysis_action_button("Detect tissue outline into ROI Manager", self.detect_tissue_action))
-            row.add(JLabel("Uses the source image, its current frame, and the enabled channels."))
-            return row
-        if has("tune_", "run_tuning_folder"):
-            box = JPanel(GridBagLayout())
+            self.module_action_end(
+                panel, self.analysis_action_button("Detect tissue outline into ROI Manager", self.detect_tissue_action),
+                "Uses the source image, its current frame, and the enabled channels."
+            )
+        elif has("tune_", "run_tuning_folder"):
             self.tune_folder_field = JTextField("", 40)
             self.add_grid_row(
-                box, 0, "Annotated folder (empty = Batch input folder)", self.tune_folder_field,
+                panel, 0, "Annotated folder (empty = Batch input folder)", self.tune_folder_field,
                 JButton("Browse", actionPerformed=lambda event: self.choose_into(self.tune_folder_field, True))
             )
-            buttons = JPanel(FlowLayout(FlowLayout.LEFT))
-            buttons.add(self.analysis_action_button("Run tuning...", self.run_tuning_action))
-            buttons.add(JLabel("File extensions, subfolders, ROI folder and Bio-Formats come from the Batch tab."))
-            self.add_wide_row(box, 1, buttons)
-            return box
-        if has("correct_", "run_count_correction"):
-            box = JPanel(GridBagLayout())
+            self.module_action_end(
+                panel, self.analysis_action_button("Run tuning...", self.run_tuning_action),
+                "File extensions, subfolders, ROI folder and Bio-Formats come from the Batch tab."
+            )
+        elif has("correct_", "run_count_correction"):
             self.correct_source_field = JTextField("", 40)
             self.correct_table_field = JTextField("", 40)
             self.correct_channel_field = JTextField("", 8)
             self.add_grid_row(
-                box, 0, "Validation runs (folder) or a table of counts (CSV)", self.correct_source_field,
+                panel, 0, "Validation runs (folder) or a table of counts (CSV)", self.correct_source_field,
                 JButton("Browse", actionPerformed=lambda event: self.choose_into(self.correct_source_field, None))
             )
             self.add_grid_row(
-                box, 1, "Result table to correct (optional)", self.correct_table_field,
+                panel, 1, "Result table to correct (optional)", self.correct_table_field,
                 JButton("Browse", actionPerformed=lambda event: self.choose_into(self.correct_table_field, False))
             )
-            self.add_grid_row(box, 2, "Channel (number, C-label or name)", self.correct_channel_field)
-            buttons = JPanel(FlowLayout(FlowLayout.LEFT))
-            buttons.add(self.analysis_action_button("Run count correction...", self.run_correction_action))
-            buttons.add(JLabel("Nothing existing is changed; results go to a new folder."))
-            self.add_wide_row(box, 3, buttons)
-            return box
-        if has("robust_", "run_robustness_from_options"):
-            row = JPanel(FlowLayout(FlowLayout.LEFT))
-            row.add(self.analysis_action_button("Run robustness...", self.run_robustness_action))
-            row.add(JLabel("Uses the input folder, regions and file options of the Batch tab; progress and Cancel are on the Batch tab and below."))
-            return row
-        return None
+            self.add_grid_row(panel, 2, "Channel (number, C-label or name)", self.correct_channel_field)
+            self.module_action_end(
+                panel, self.analysis_action_button("Run count correction...", self.run_correction_action),
+                "Nothing existing is changed; results go to a new folder."
+            )
+        elif has("robust_", "run_robustness_from_options"):
+            self.module_action_end(
+                panel, self.analysis_action_button("Run robustness...", self.run_robustness_action),
+                "Uses the input folder, regions and file options of the Batch tab; progress and Cancel are on the Batch tab and below."
+            )
 
     @ui_action
     def choose_into(self, field, directories):
@@ -1145,15 +4353,54 @@ class CellQuantStudioUniversal(JFrame):
             else:
                 widget.setText(to_text(options[key]))
 
+    # ----- Help tab -----------------------------------------------------------
+
     def build_help_tab(self):
-        text = JTextArea()
-        text.setEditable(False)
-        text.setLineWrap(True)
-        text.setWrapStyleWord(True)
-        text.setFont(Font("SansSerif", Font.PLAIN, 13))
-        text.setText(
-            "CELL QUANT STUDIO UNIVERSAL " + APP_VERSION + "\n\n"
-            "Copyright (C) 2026 Ivan Khimach. Free software under the GNU General Public License, version 3 or later "
+        pane = JTextPane()
+        pane.setEditable(False)
+        pane.setBorder(BorderFactory.createEmptyBorder(4, 4, 4, 4))
+        self.fill_help(pane)
+        pane.setCaretPosition(0)
+        scroll = JScrollPane(pane)
+        scroll.setBorder(BorderFactory.createEmptyBorder())
+        scroll.getVerticalScrollBar().setUnitIncrement(16)
+        card = Card(None, grow=True)
+        grid_add(card, scroll, 0, form_next_row(card), width=3, weightx=1.0, weighty=1.0, fill=GridBagConstraints.BOTH)
+        return page_fill(card, HELP_WIDTH)
+
+    def fill_help(self, pane):
+        """The help text with its headings set off: the first line of a block
+        that has more lines and does not end with a full stop."""
+        document = pane.getStyledDocument()
+        body = SimpleAttributeSet()
+        StyleConstants.setFontFamily(body, look_font("ui", 13).getFamily())
+        StyleConstants.setFontSize(body, 13)
+        strong = look_font("ui_semibold", 15)
+        heading = SimpleAttributeSet()
+        StyleConstants.setFontFamily(heading, strong.getFamily())
+        StyleConstants.setFontSize(heading, 15)
+        StyleConstants.setBold(heading, strong.isBold())
+        title = SimpleAttributeSet()
+        StyleConstants.setFontFamily(title, strong.getFamily())
+        StyleConstants.setFontSize(title, 20)
+        StyleConstants.setBold(title, strong.isBold())
+        blocks = self.help_text().split("\n\n")
+        for index in range(len(blocks)):
+            lines = blocks[index].split("\n")
+            if index == 0:
+                document.insertString(document.getLength(), lines[0] + "\n", title)
+                continue
+            if len(lines) > 1 and len(lines[0]) < 48 and not lines[0].endswith("."):
+                document.insertString(document.getLength(), "\n" + lines[0] + "\n", heading)
+                document.insertString(document.getLength(), "\n".join(lines[1:]) + "\n", body)
+            else:
+                document.insertString(document.getLength(), "\n" + blocks[index] + "\n", body)
+
+    def help_text(self):
+        return (
+            APP_NAME + " " + APP_VERSION + "\n\n"
+            "Copyright (C) 2026 Ivan Khimach and Maksym Taran. Free software under the GNU General Public License, "
+            "version 3 or later "
             "(GPL-3.0-or-later): you may share and change it under its terms. It comes with ABSOLUTELY NO WARRANTY. "
             "See the LICENSE file of the release.\n\n"
             "Analysis modes\n"
@@ -1195,14 +4442,26 @@ class CellQuantStudioUniversal(JFrame):
             "Its buttons detect the tissue outline into ROI Manager, tune settings against point marks, correct counts from validated fields, "
             "and test whether a group difference holds across a grid of settings.\n\n"
             "Background runs\n"
-            "Run analysis, Quick run, validation, sensitivity and the Analyses buttons work in the background: the window stays usable, "
+            "'3 Analyse', Quick run, validation, sensitivity and the Analyses buttons work in the background: the window stays usable, "
             "the strip at the bottom shows progress, and its Cancel button stops the run after the current step. "
             "While such a run uses the prepared images, preparing again and closing generated images wait until it ends.\n\n"
+            "Run log\n"
+            "Every status message is kept with its time in the run log (Show run log, bottom right) and in Fiji's Log window, "
+            "and each analysis saves it as run_log.txt in its run folder. A warning or an error turns the status line red, "
+            "and the log button counts them until the log is opened.\n\n"
+            "Channels of the source image\n"
+            "The Session tab lists every channel of the source image with its display color and, when the file's metadata "
+            "gives them, its name and its excitation and emission wavelengths (read with Bio-Formats), beside the name and "
+            "analysis mode set for that channel here. A channel called DAPI or Hoechst whose excitation is not at about "
+            "350-420 nm, or a 405 nm channel while another channel is called DAPI, is pointed out in a line under the list. "
+            "Nothing else is guessed, and nothing is changed: correct the names on the Channels tab.\n\n"
+            "Appearance\n"
+            "Light and Dark (top right) give this window, and the rest of Fiji while it is open, a look of its own; "
+            "Fiji leaves Fiji's own look alone. The choice is remembered, and Fiji's look comes back when the window closes.\n\n"
             "Outputs\n"
             "Each run creates a timestamped folder containing roi_summary.csv, objects.csv, thresholds.csv, settings.properties, run_log.txt, and optional prepared images, masks, ROI sets, and overlays. "
             "Tables are UTF-8 text. thresholds.csv records every threshold and segmentation setting actually used, together with the application and ImageJ versions."
         )
-        return JScrollPane(text)
 
     # ----- status and error handling -----------------------------------------
 
@@ -1214,10 +4473,13 @@ class CellQuantStudioUniversal(JFrame):
             try:
                 self.status_area.append(text + "\n")
                 self.status_area.setCaretPosition(self.status_area.getDocument().getLength())
-                if self.background_active:
-                    # The latest message of a background job, beside its progress bar.
-                    shown = to_text(message)
-                    self.job_label.setText(self.background_label + ": " + (shown if len(shown) <= 110 else shown[:107] + "..."))
+                # The status line shows the latest message (of a background
+                # job, with its name, beside its progress bar).
+                shown = to_text(message)
+                shown = shown if len(shown) <= 110 else shown[:107] + "..."
+                self.job_label.setText((self.background_label + ": " + shown) if self.background_active else shown)
+                self.job_label.setToolTipText(to_text(message))
+                self.note_warning(message)
             except ANY_ERROR:
                 pass
 
@@ -1233,6 +4495,28 @@ class CellQuantStudioUniversal(JFrame):
             IJ.log(APP_NAME + ": " + to_text(message))
         except ANY_ERROR:
             pass
+
+    def note_warning(self, message):
+        """Event thread: a warning or an error stays visible while the run log
+        is hidden: the status line shows it in red, and the log button says
+        how many there are, until the log is opened."""
+        if getattr(self, "log_drawer", None) is None or getattr(self, "log_button", None) is None:
+            return
+        words = to_text(message)
+        lowered = words.lower()
+        warning = lowered.startswith("warning") or "warning:" in lowered or words.startswith("ERROR")
+        if not warning:
+            if getattr(self, "warning_count", 0) == 0:
+                set_style(self.job_label, "foreground: $Label.disabledForeground")
+            return
+        if self.log_drawer.isVisible():
+            set_style(self.job_label, "foreground: $CellQuant.danger")
+            return
+        self.warning_count = getattr(self, "warning_count", 0) + 1
+        set_style(self.job_label, "foreground: $CellQuant.danger")
+        self.log_button.setText("Show run log (" + str(self.warning_count) +
+                                (" warning)" if self.warning_count == 1 else " warnings)"))
+        set_style(self.log_button, BUTTON_STYLES["danger"])
 
     def report_exception(self, context, exc):
         message = context + ": " + to_text(exc)
@@ -1646,6 +4930,7 @@ class CellQuantStudioUniversal(JFrame):
 
         self.invalidate_prepared_cache()
         self.append_status("Applied preset: " + name)
+        self.refresh_channel_list()
 
     # ----- image selection and opening ---------------------------------------
 
@@ -1792,12 +5077,17 @@ class CellQuantStudioUniversal(JFrame):
         self.populate_calibration_fields()
 
     def update_source_info(self):
+        self.source_preview.show_image(self.source_imp)
+        self.image_stage.getLayout().show(self.image_stage, "drop" if self.source_imp is None else "preview")
+        self.read_source_channels()
         if self.source_imp is None:
             self.image_info_area.setText("No source image selected.")
+            self.show_image_summary(None)
             return
         imp = self.source_imp
         cal = imp.getCalibration()
         unit = cal.getUnit() if cal is not None else "pixel"
+        self.show_image_summary(self.image_summary(imp, cal, unit))
         lines = [
             "Title: " + to_text(imp.getTitle()),
             "Path: " + (self.source_path if self.source_path else "<active image; no file path>"),
@@ -1814,6 +5104,56 @@ class CellQuantStudioUniversal(JFrame):
         if imp.getBitDepth() == 24:
             lines.append("Warning: RGB images are not supported for threshold/object analysis. Open channels as grayscale with Bio-Formats.")
         self.image_info_area.setText("\n".join(lines))
+
+    def image_summary(self, imp, cal, unit):
+        """The source image as the Session tab shows it: text per summary key."""
+        width = cal.pixelWidth if cal is not None else 1
+        height = cal.pixelHeight if cal is not None else 1
+        unit = to_text(unit if unit else "pixel")
+        if unit in ("pixel", "pixels"):
+            pixel = "not calibrated (sizes in pixels)"
+        else:
+            pixel = ("%.4g x %.4g " % (width, height)) + unit_words(unit) + " per pixel"
+        if self.calibration_overridden():
+            # What the analysis will use, and what the file says.
+            pixel = (text_value(self.pixel_width_field) + " x " + text_value(self.pixel_height_field) + " " +
+                     text_value(self.spatial_unit_field) + " per pixel (override; file: " + pixel + ")")
+        warnings = []
+        if unit in ("pixel", "pixels") and not self.calibration_overridden():
+            warnings.append("Not calibrated: areas and densities will be in pixels. Set the pixel size under "
+                            "ROIs and output > Spatial calibration.")
+        if imp.getNChannels() > MAX_CHANNELS:
+            warnings.append("This application exposes the first " + str(MAX_CHANNELS) + " channels.")
+        if imp.getBitDepth() == 24:
+            warnings.append("RGB images are not supported for threshold/object analysis. Open channels as grayscale with Bio-Formats.")
+        extent = ""
+        if unit not in ("pixel", "pixels"):
+            extent = ("%.1f x %.1f " % (imp.getWidth() * width, imp.getHeight() * height)) + unit_words(unit)
+        return {
+            "name": to_text(imp.getTitle()),
+            "size": str(imp.getWidth()) + " x " + str(imp.getHeight()) + " pixels",
+            "extent": extent,
+            "depth": "RGB (24-bit)" if imp.getBitDepth() == 24 else str(imp.getBitDepth()) + "-bit",
+            "channels": str(imp.getNChannels()),
+            "slices": str(imp.getNSlices()),
+            "frames": str(imp.getNFrames()),
+            "position": "C" + str(imp.getC()) + ", Z" + str(imp.getZ()) + ", T" + str(imp.getT()),
+            "pixel": pixel,
+            "path": os.path.dirname(self.source_path) if self.source_path else "active image; no file path",
+            "warning": " ".join(warnings)
+        }
+
+    def calibration_choice_changed(self, event=None):
+        """The summary of the source image shows the pixel size the analysis will use."""
+        if self.source_imp is not None:
+            self.update_source_info()
+
+    def calibration_overridden(self):
+        box = getattr(self, "override_calibration_cb", None)
+        try:
+            return box is not None and bool(box.isSelected())
+        except ANY_ERROR:
+            return False
 
     def update_channel_availability(self):
         count = self.source_imp.getNChannels() if self.source_imp is not None else MAX_CHANNELS
@@ -2239,7 +5579,7 @@ class CellQuantStudioUniversal(JFrame):
             return
         raise ValueError(
             "Display-minimum thresholding requires the current prepared images. "
-            "Click '1. Prepare enabled channels', adjust Brightness/Contrast for C" +
+            "Click '1 Prepare channels', adjust Brightness/Contrast for C" +
             str(target["channel"]) + " (" + target["name"] + "), and try again without changing preprocessing settings."
         )
 
@@ -2281,7 +5621,7 @@ class CellQuantStudioUniversal(JFrame):
                 # Preparing now would capture a default display range, not
                 # the one that was set by eye.
                 raise ValueError(
-                    "There is no current prepared image to capture from. Click '1. Prepare enabled channels', "
+                    "There is no current prepared image to capture from. Click '1 Prepare channels', "
                     "adjust Brightness/Contrast for C" + str(channel_number) + ", and capture again."
                 )
             prepared = self.ensure_current_prepared(configs)
@@ -2446,7 +5786,7 @@ class CellQuantStudioUniversal(JFrame):
                 if self.needs_mask(config) and config["threshold_mode"] == "Display minimum":
                     raise ValueError(
                         "Quick run cannot pause for manual Brightness/Contrast. Change Display minimum to Auto or Manual, "
-                        "or use Prepare followed by Run analysis."
+                        "or use '1 Prepare channels' followed by '3 Analyse'."
                     )
             self.run_analysis_action()
         except ANY_ERROR as exc:
@@ -2467,7 +5807,7 @@ class CellQuantStudioUniversal(JFrame):
 
     def create_run_folder(self, output_root, source_title, kind, configs=None, frames=None):
         """Name and create the folder of one single-image run: kind "analysis"
-        (3. Run analysis and Quick run), "Validation" or "Sensitivity".
+        ('3 Analyse' and Quick run), "Validation" or "Sensitivity".
         This is the only place the window names such a folder."""
         # The engine names it: <image>_CellQuant_[<kind>_]<time>, with the
         # image name shortened only when a result path would otherwise be
@@ -2515,7 +5855,7 @@ class CellQuantStudioUniversal(JFrame):
                 edited = self.edited_prepared_channels(configs)
                 raise ValueError(
                     "Display-minimum thresholding requires the current prepared images. "
-                    "Click '1. Prepare enabled channels', adjust Brightness/Contrast for " + labels +
+                    "Click '1 Prepare channels', adjust Brightness/Contrast for " + labels +
                     ", preview the masks, and then run the analysis without changing preprocessing settings." +
                     ("" if len(edited) == 0 else
                      "\nThe pixels of the prepared image of " + ", ".join(["C" + str(channel) for channel in edited]) +
@@ -2580,6 +5920,9 @@ class CellQuantStudioUniversal(JFrame):
             self.save_run_log(os.path.join(run_dir, "run_log.txt"))
             raise
         self.save_run_log(os.path.join(run_dir, "run_log.txt"))
+        # The picture of the Results tab, made here so that the window does
+        # not freeze while it is drawn. It only reads files of the run.
+        values["result_pictures"] = results_pictures(run_dir, values["configs"])
         return result
 
     def analysis_finished(self, job):
@@ -2620,6 +5963,10 @@ class CellQuantStudioUniversal(JFrame):
             self.source_path = ""
             self.update_source_info()
 
+        self.show_results(
+            result, values["configs"], values["run_dir"], values["source"].getTitle(),
+            pictures=values.get("result_pictures")
+        )
         self.show_job_result("Analysis complete.", values["run_dir"], warning)
 
     def show_job_result(self, headline, run_dir, warning=""):
@@ -2710,6 +6057,7 @@ class CellQuantStudioUniversal(JFrame):
             for panel in self.channel_panels:
                 panel.read_properties(props)
             self.invalidate_prepared_cache()
+            self.refresh_channel_list()
             saved_version = props.getProperty("application.version")
             self.append_status(
                 "Loaded settings profile: " + to_text(path) +
@@ -3374,7 +6722,7 @@ class CellQuantStudioUniversal(JFrame):
         if result.get("corrected_path"):
             text += "Corrected table: " + to_text(os.path.basename(result["corrected_path"])) + "\n"
         if len(warnings) > 0:
-            text += str(len(warnings)) + " warning(s); see the status log.\n"
+            text += str(len(warnings)) + " warning(s); see the run log (Show run log, bottom right).\n"
         text += "\nSaved to:\n" + out_dir
         JOptionPane.showMessageDialog(
             self, text, APP_NAME, JOptionPane.WARNING_MESSAGE if len(warnings) > 0 else JOptionPane.INFORMATION_MESSAGE

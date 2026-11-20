@@ -17,6 +17,30 @@ Built-in tools check the results: object counts against manual point marks, mask
 
 > **Version 2.3.0.** This version has been run and tested in a real Fiji (Jython 2.7.4, ImageJ 1.54p, Java 21) and on the author's Zeiss CZI images. Upgrading from 2.2.x? Read [CHANGELOG.md](CHANGELOG.md) first: some results change on purpose. The earlier macros are kept in [legacy/](legacy/) and are not covered here.
 
+![The Results tab after an analysis: headline numbers, objects per region, the merged color picture and the overlay picture](docs/images/results_tab.jpg)
+
+*The Results tab after an analysis of a synthetic test image.*
+
+## Look and Results tab
+
+- **Results tab: the organoid map.** After "3. Run analysis" the window shows the run as one picture.
+  - **In the middle**, wide rings, one per parent ROI (the first eight), from the outside in. The arc of a ring is that region's value as a share of the largest one. At their center, in a small round window, is the picture of the run: all channels merged in their own colors, every detected object outlined. A click on it shows the whole picture, uncropped, with the parent ROIs named; another click goes back.
+  - **On the left**, the headline figures (counts added up over the parent ROIs with the overall density; positive-area shares as positive area of all ROIs over their area), the list **Rings show** that chooses the value of the rings (object count, object density per mm², or positive-area share, for every channel that has it), and the **Analyse** button, which runs the analysis like "3. Run analysis".
+  - **On the right**, the regions: the chosen value in large figures, the other values and the ROI area under the name; below them, what can be pointed at and clicked.
+  - Pointing at a ring or at a region lights it up and outlines that region on the picture.
+  - Nothing new is measured or written: every number comes from `roi_summary.csv`, which remains the record.
+
+![One ring metric chosen and one region pointed at](docs/images/results_hover.jpg)
+
+![The whole picture after a click](docs/images/results_picture.jpg)
+- **Appearance.** The window has two looks of its own, chosen under **Appearance** at the top right: **Dark**, deep-water blues with one glowing accent, and **Light**, white and soft grey with one blue accent. Both use IBM Plex Sans for the interface and Chakra Petch, an angular technical face, for the title and the figures. The fonts are in the `fonts` folder under the SIL Open Font License; without them the window uses the system fonts. The looks are built on FlatLaf's dark and light themes, which ship with Fiji. A Swing theme applies to every Fiji window, so Fiji changes with it while Cell Quant Studio is open and gets its previous look back when the window closes. **Appearance > Fiji default** leaves Fiji as it is; the choice is remembered.
+
+- **Session tab.** A drop zone for the image file with the workflow steps, and a small picture of the source image beside its description.
+
+![The Session tab in the Dark appearance](docs/images/session_tab.jpg)
+
+![The Results tab in the Light appearance](docs/images/results_tab_light.jpg)
+
 ## Capabilities
 
 | Area | What you can do |
@@ -71,6 +95,7 @@ An object is a segmented image component; its biological identity must be establ
 | `cellquantrobust.py` | Optional: group-level robustness across a grid of settings. |
 | `cellquant_batch_headless.py` | Folder batch from a saved profile, without the window. |
 | `tests/` | Automated tests: `run_tests.py` (engine and modules, loads every `test_*.py`), `gui_smoke.py` (the window), `run_tests.sh` and `cli_runner.py` (run them from a terminal). |
+| `fonts/` | IBM Plex Sans and Chakra Petch with their licence texts (SIL Open Font License 1.1). Optional: copy the folder beside the application files to get the window's own look. |
 | `tools/` | `cellquant_figures.py`: SVG figures from result tables, with its own tests. |
 | `examples/` | An example four-channel settings profile. |
 | `docs/VALIDATION.md` | How to validate a profile with the built-in tools. |
@@ -83,7 +108,7 @@ The launcher, engine, window and every optional module check that they come from
 
 ## Installation and launch
 
-1. Copy the application files (the launcher, the engine, the window file and the six `cellquant*.py` module files) into `Fiji.app/plugins/Scripts/Cell Quant Studio/`. If an older version is installed there, replace all of its files.
+1. Copy the application files (the launcher, the engine, the window file and the six `cellquant*.py` module files) into `Fiji.app/plugins/Scripts/Cell Quant Studio/`. If an older version is installed there, replace all of its files. Copy the `fonts` folder there too (optional; it gives the window its own typefaces).
 2. Open `Cell_Quant_Studio_final.py` in Fiji's Script Editor.
 3. Select **Language > Python (Jython)** if needed and click **Run**.
 
@@ -429,7 +454,7 @@ The automated tests build synthetic images with known answers and check the resu
   bash tests/run_tests.sh /path/to/Fiji.app "$PWD/tests/gui_smoke.py"
   ```
 
-  The first runs the engine and module tests (125 tests, about 4300 checks, about 1 minute). The second runs the window test (29 steps); it opens windows for about half a minute.
+  The first runs the engine and module tests (126 tests, about 4300 checks, about 1 minute). The second runs the window test (30 steps); it opens windows for about half a minute.
 - **Selected tests only:** set `CELLQUANT_TEST_FILTER=word`.
 - **Large images:** set `CELLQUANT_JAVA_OPTS=-Xmx16g`.
 
@@ -472,7 +497,9 @@ Include the package version, Fiji and Java versions, operating system, image dim
 
 Citation metadata is in [CITATION.cff](CITATION.cff). Cite the version used, which is recorded in every table.
 
-Cell Quant Studio is free software, released under the [GNU General Public License, version 3 or later](LICENSE) (GPL-3.0-or-later). You may use, study, change and share it. If you distribute it, or a modified version, you must do so under the same licence and make the source code available. It comes with no warranty. The files in [legacy/](legacy/) are the author's earlier macros and are covered by the same licence.
+Copyright (C) 2026 Ivan Khimach and Maksym Taran.
+
+Cell Quant Studio is free software, released under the [GNU General Public License, version 3 or later](LICENSE) (GPL-3.0-or-later). You may use, study, change and share it. If you distribute it, or a modified version, you must do so under the same licence and make the source code available. It comes with no warranty. The typefaces in [fonts/](fonts/) are not covered by that licence: they are under the SIL Open Font License 1.1, whose text is beside them. The files in [legacy/](legacy/) are the author's earlier macros and are covered by the same licence.
 
 For other licensing terms (for example, use inside a closed-source product), contact the author.
 

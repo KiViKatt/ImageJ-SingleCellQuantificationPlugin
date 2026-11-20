@@ -2,7 +2,7 @@
 
 ## 2.3.0 (2026-11-19)
 
-Nothing was removed. Profiles saved by 2.2.x load unchanged, and every table keeps its 2.2 columns in the same order; new columns are added after them. This release was run and tested in a real Fiji (Jython 2.7.4, ImageJ 1.54p, Java 21): 125 automated engine and module tests, a 29-step automated window test, and comparisons with a 2.2 run on the author's Zeiss CZI images.
+Nothing was removed. Profiles saved by 2.2.x load unchanged, and every table keeps its 2.2 columns in the same order; new columns are added after them. This release was run and tested in a real Fiji (Jython 2.7.4, ImageJ 1.54p, Java 21): 126 automated engine and module tests, a 30-step automated window test, and comparisons with a 2.2 run on the author's Zeiss CZI images.
 
 ### Results that change compared with 2.2.x
 
@@ -29,6 +29,10 @@ Read this section before comparing new numbers with old ones.
 
 ### Added
 
+- **Results tab: the organoid map.** After an analysis the window shows a round picture of the run (all channels merged, detected objects outlined) with one ring per parent ROI around it, the headline figures on the left and the regions on the right. The rings can show object counts, object densities per mm² or positive-area shares; pointing at a ring or a region lights it up and outlines it on the picture; a click on the picture shows all of it, uncropped. It reads the summary table and the saved files of the run; no table, file or number changes.
+- **A new appearance, in two looks:** **Dark**, deep-water blues with one glowing accent, and **Light**, white and soft grey with one blue accent. Both use IBM Plex Sans and Chakra Petch (bundled in `fonts/`, SIL Open Font License) and round buttons with one filled button for the main action. They are built on FlatLaf's dark and light themes and apply to all Fiji windows while Cell Quant Studio is open; the previous look is put back when the window closes. **Appearance** at the top right switches between Dark, Light and **Fiji default** (the window's own looks off) at once, and the choice is remembered. Without FlatLaf or without the fonts the window still works with what Fiji has.
+- **Consistent layout on every tab:** one aligned label column per tab, buttons of one size within a row and behind fields, content in a centered column instead of stretched across the window, group titles above their outline, and forms that start at the top of their area. The Session tab's actions are two rows: getting an image, then the steps of an analysis. No button text changed.
+- **Session tab:** a drop zone for the image file and a small picture of the source image. The workflow text of the old drop area is now its tooltip.
 - **Optional analysis modules**, each in its own file, with settings saved in profiles and a new **Analyses** tab. With a module off, every table is byte-for-byte unchanged (tested).
   - `cellquanttissue.py`: automatic tissue outline (Gaussian smoothing in micrometers, automatic threshold on a log scale, hole filling, region-size filter); window button and the batch region policy "Automatic tissue outline"; `tissue_outline.csv`, outline ROIs and a check image; `Tissue_Outlines/` in batches.
   - `cellquantdepth.py`: depth profile from the ROI outline (`depth_profile.csv`; object depth columns in `objects.csv`).
@@ -96,6 +100,8 @@ Read this section before comparing new numbers with old ones.
 
 ### Changed
 
+- **CLAHE runs on several processor cores.** It was by far the slowest step on a large image. The image is cut into horizontal strips that overlap by the block radius; the result is pixel-identical to CLAHE on the whole image, which a test checks. On a 4084 x 4084 plane on an 18-core Mac it took about 2 seconds instead of 17, and a whole run with the default preset about 8 seconds instead of 22.
+- **The picture of the Results tab is drawn on the worker thread**, so the window no longer freezes for a few seconds after a large analysis.
 - The application is a launcher, an engine, a window, six optional modules and a headless batch script. Each file stays within what Fiji's Jython can compile.
 - The automatic threshold is computed from the full data range explicitly.
 - ROI sets are read and written directly instead of through a hidden ROI Manager, so a damaged file raises an error message instead of opening a dialog.
