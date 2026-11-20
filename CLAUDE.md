@@ -23,7 +23,7 @@ Version 2.3.0 has been run and tested in the owner's real Fiji: Jython 2.7.4, Im
 **Automated tests:**
 
 - `tests/run_tests.py`: 125 tests, about 4300 checks, all pass.
-- `tests/gui_smoke.py`: 29 window steps, all pass.
+- `tests/gui_smoke.py`: 30 window steps, all pass.
 - Both also pass on macOS (Apple silicon, the same Fiji versions; 4302 checks there), run on 2026-11-19. No real image was used on macOS.
 - `tools/test_cellquant_figures.py`: 6 tests, all pass.
 
@@ -87,6 +87,8 @@ All version constants and every module's registered version must match. The laun
 - **Binary operations go through `binary_morphology()`** with explicit iterations and neighbour count, never `IJ.run`.
 - **8-bit conversion before Local Phansalkar uses `convertToByte(True)` after `setMinAndMax`.** Local Phansalkar and CLAHE are called through their classes (pixel-identical to the menu commands), so they work without menus and without a display.
 - **`IJ.run` does not raise when a plugin fails.** Verify the effect.
+- **The dark look is a global Swing look.** `look_install()` switches Fiji to FlatLaf dark when the window opens and `look_restore()` hands back the previous look object when it closes (`LookWindowListener`). Keep the look object itself: under Jython `obj.getClass().getName()` raises. Button styling uses FlatLaf client properties only, so other looks ignore it. Tests press buttons by their text: keep button texts unique and unchanged.
+- **The Results tab only displays.** `results_from_summary()` reads the summary rows of the finished run; it must never measure or write anything, and a failure in `show_results()` must not fail the analysis.
 - **Window threading:**
   - Status messages before the window is displayable are appended directly; afterwards through `run_on_ui`.
   - Never use `invokeAndWait` from a worker thread.

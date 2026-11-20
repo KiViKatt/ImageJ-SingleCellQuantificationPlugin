@@ -24,19 +24,24 @@ if APP_VERSION != CORE_VERSION:
         APP_VERSION + ". Re-extract the release so that all files come from one package."
     )
 
-from ij import IJ, WindowManager
+from ij import IJ, WindowManager, Prefs
+from ij.process import ImageProcessor
 from ij.plugin.frame import RoiManager
 from ij.measure import ResultsTable, Measurements
 
 from javax.swing import (
     JFrame, JPanel, JTabbedPane, JScrollPane, JTextArea, JButton, JLabel,
     JFileChooser, JOptionPane, JSplitPane, JTextField, JCheckBox, JComboBox,
-    JProgressBar, BoxLayout, BorderFactory, SwingUtilities
+    JProgressBar, BoxLayout, BorderFactory, SwingUtilities, UIManager
 )
+from javax.swing import Timer as SwingTimer
 from java.awt import (
     BorderLayout, GridBagLayout, GridBagConstraints, Insets, Dimension, Font,
-    Color, FlowLayout, Cursor, Window
+    Color, FlowLayout, Cursor, Window, RenderingHints, GradientPaint, BasicStroke
 )
+from java.awt.event import WindowAdapter, ActionListener
+from java.awt.geom import RoundRectangle2D, Arc2D
+from java.util import HashMap
 from java.awt.dnd import DropTarget, DnDConstants, DropTargetAdapter
 from java.awt.datatransfer import DataFlavor
 from java.io import File
@@ -505,6 +510,526 @@ class ChannelSettingsPanel(JPanel):
 
 
 # -----------------------------------------------------------------------------
+# Look of the window, and the Results tab
+# -----------------------------------------------------------------------------
+#
+# The dark look is Fiji's own FlatLaf dark theme with a few rounder shapes
+# and one accent color. A Swing look applies to every window of Fiji, so it
+# is switched on when the window opens and the previous look is put back
+# when the window closes. The choice (header, top right) is remembered.
+
+LOOK_DARK = "Dark"
+LOOK_FIJI = "Fiji default"
+LOOK_NAMES = [LOOK_DARK, LOOK_FIJI]
+LOOK_PREF_KEY = "cellquant.look"
+LOOK_STATE = {"active": False, "previous": None, "extras": None}
+LOOK_ACCENT = Color(45, 212, 191)
+LOOK_ACCENT_HEX = "#2dd4bf"
+LOOK_EXTRAS = [
+    ("@accentColor", LOOK_ACCENT_HEX),
+    ("@background", "#111827"),
+    ("Button.arc", "14"),
+    ("Component.arc", "12"),
+    ("TextComponent.arc", "12"),
+    ("CheckBox.arc", "6"),
+    ("ProgressBar.arc", "999"),
+    ("Component.focusWidth", "1"),
+    ("ScrollBar.width", "12"),
+    ("ScrollBar.thumbArc", "999"),
+    ("ScrollBar.thumbInsets", "2,2,2,2"),
+    ("TabbedPane.tabHeight", "38"),
+    ("TabbedPane.tabSelectionHeight", "3"),
+    ("TabbedPane.showTabSeparators", "false"),
+    ("TitledBorder.titleColor", LOOK_ACCENT_HEX),
+    ("SplitPane.dividerSize", "8")
+]
+CHANNEL_SWATCHES = {
+    "Blue": Color(96, 165, 250), "Green": Color(74, 222, 128), "Red": Color(248, 113, 113),
+    "Magenta": Color(232, 121, 249), "Cyan": Color(34, 211, 238), "Yellow": Color(250, 204, 21)
+}
+RESULTS_TAB_TITLE = "Results"
+RESULTS_MAX_PICTURES = 2
+RESULTS_PICTURE_SIZE = 900
+
+
+def look_preference():
+    try:
+        look_value = to_text(Prefs.get(LOOK_PREF_KEY, LOOK_DARK))
+    except ANY_ERROR:
+        return LOOK_DARK
+    return look_value if look_value in LOOK_NAMES else LOOK_DARK
+
+
+def look_install():
+    """Switch Fiji to the dark look (event thread). True when it is on."""
+    if LOOK_STATE["active"]:
+        return True
+    try:
+        from com.formdev.flatlaf import FlatLaf, FlatDarkLaf
+        # The look object itself is kept, to be handed back by look_restore().
+        LOOK_STATE["previous"] = UIManager.getLookAndFeel()
+        LOOK_STATE["extras"] = FlatLaf.getGlobalExtraDefaults()
+        extras = HashMap()
+        for pair in LOOK_EXTRAS:
+            extras.put(pair[0], pair[1])
+        FlatLaf.setGlobalExtraDefaults(extras)
+        FlatDarkLaf.setup()
+        FlatLaf.updateUI()
+        LOOK_STATE["active"] = True
+    except ANY_ERROR as exc:
+        # No FlatLaf in this Fiji: the window keeps Fiji's look.
+        try:
+            IJ.log(APP_NAME + ": the dark look is not available (" + to_text(exc) + ").")
+        except ANY_ERROR:
+            pass
+        return False
+    return True
+
+
+def look_restore():
+    """Put back the look Fiji had before look_install() (event thread)."""
+    if not LOOK_STATE["active"]:
+        return
+    LOOK_STATE["active"] = False
+    try:
+        from com.formdev.flatlaf import FlatLaf
+        FlatLaf.setGlobalExtraDefaults(LOOK_STATE["extras"])
+        if LOOK_STATE["previous"] is not None:
+            UIManager.setLookAndFeel(LOOK_STATE["previous"])
+        FlatLaf.updateUI()
+    except ANY_ERROR:
+        pass
+
+
+def look_color(key, fallback):
+    try:
+        found = UIManager.getColor(key)
+        if found is not None:
+            return found
+    except ANY_ERROR:
+        pass
+    return fallback
+
+
+def look_is_dark():
+    back = look_color("Panel.background", Color.white)
+    return (back.getRed() + back.getGreen() + back.getBlue()) < 384
+
+
+def look_mix(first, second, share):
+    """A color between first and second: share 0 is first, 1 is second."""
+    return Color(
+        int(round(first.getRed() + (second.getRed() - first.getRed()) * share)),
+        int(round(first.getGreen() + (second.getGreen() - first.getGreen()) * share)),
+        int(round(first.getBlue() + (second.getBlue() - first.getBlue()) * share))
+    )
+
+
+def look_smooth(graphics):
+    graphics.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
+    graphics.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON)
+    graphics.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR)
+
+
+def style_button(button, kind="plain"):
+    """Round buttons; "primary" is the filled accent button of a section and
+    "step" a numbered workflow step. Looks other than FlatLaf ignore this."""
+    try:
+        button.putClientProperty("JButton.buttonType", "roundRect")
+        if kind == "primary":
+            button.putClientProperty(
+                "FlatLaf.style",
+                "background: #14b8a6; hoverBackground: #2dd4bf; pressedBackground: #0d9488; "
+                "foreground: #042f2e; borderWidth: 0; focusWidth: 2; font: bold; margin: 6,18,6,18"
+            )
+        elif kind == "step":
+            button.putClientProperty(
+                "FlatLaf.style", "borderColor: #14b8a6; borderWidth: 1; font: bold; margin: 6,14,6,14"
+            )
+        else:
+            button.putClientProperty("FlatLaf.style", "margin: 6,12,6,12")
+    except ANY_ERROR:
+        pass
+    return button
+
+
+def channel_swatch(config, position):
+    """Color that stands for a channel in the Results tab: its lookup table,
+    or one of a fixed series when it has none."""
+    if config is not None and config.get("lut") in CHANNEL_SWATCHES:
+        return CHANNEL_SWATCHES[config["lut"]]
+    series = [Color(45, 212, 191), Color(167, 139, 250), Color(251, 146, 60), Color(244, 114, 182)]
+    return series[position % len(series)]
+
+
+def format_count(value):
+    """1234567 -> '1,234,567'."""
+    digits = str(int(round(value)))
+    sign = ""
+    if digits.startswith("-"):
+        sign = "-"
+        digits = digits[1:]
+    groups = []
+    while len(digits) > 3:
+        groups.insert(0, digits[-3:])
+        digits = digits[:-3]
+    groups.insert(0, digits)
+    return sign + ",".join(groups)
+
+
+def result_number(row, key):
+    """A table value as a float, or None when it is missing or not a number."""
+    try:
+        number = float(row.get(key, ""))
+    except (TypeError, ValueError):
+        return None
+    if number != number:
+        return None
+    return number
+
+
+def results_from_summary(headers, rows, configs):
+    """What the Results tab shows, worked out from the ROI summary table.
+
+    Returns {"tiles": [...], "bars": {...} or None, "regions": n}. A tile is
+    {"title", "value", "kind" ("count" or "percent"), "note", "color"}.
+    Counts are added up over the regions; a positive-area fraction is the
+    positive area of all regions divided by their area."""
+    by_channel = {}
+    for config in configs or []:
+        by_channel[config["channel"]] = config
+    tiles = []
+    bar_series = []
+    position = 0
+    for header in headers:
+        kind = None
+        if header.endswith("_Object_Count") and not header.endswith("_Edge_Touching_Object_Count") \
+                and not header.endswith("_Excluded_Edge_Object_Count"):
+            kind = "count"
+            prefix = header[:-len("_Object_Count")]
+        elif header.endswith("_Positive_Area_Fraction_Percent"):
+            kind = "percent"
+            prefix = header[:-len("_Positive_Area_Fraction_Percent")]
+        if kind is None:
+            continue
+        config = None
+        name = prefix
+        if prefix.startswith("C") and "_" in prefix:
+            try:
+                config = by_channel.get(int(prefix[1:prefix.index("_")]))
+            except ValueError:
+                config = None
+            name = prefix[prefix.index("_") + 1:].replace("_", " ")
+        if config is not None:
+            name = config["name"]
+        color = channel_swatch(config, position)
+        position += 1
+        per_region = []
+        for row in rows:
+            per_region.append(result_number(row, header))
+        present = [number for number in per_region if number is not None]
+        if len(present) == 0:
+            continue
+        if kind == "count":
+            tiles.append({
+                "title": name + " objects", "value": sum(present), "kind": "count", "color": color,
+                "note": "counted in " + str(len(present)) + (" region" if len(present) == 1 else " regions")
+            })
+            bar_series.append({"name": name, "color": color, "values": per_region})
+        else:
+            positive = 0.0
+            area = 0.0
+            for row in rows:
+                part = result_number(row, prefix + "_Positive_Area")
+                whole = result_number(row, "ROI_Area")
+                if part is not None and whole is not None and whole > 0:
+                    positive += part
+                    area += whole
+            value = positive / area * 100.0 if area > 0 else sum(present) / float(len(present))
+            tiles.append({
+                "title": name + " positive area", "value": value, "kind": "percent", "color": color,
+                "note": "of the measured area is above the threshold"
+            })
+    # Counts first: they are what a viewer looks for.
+    tiles = [tile for tile in tiles if tile["kind"] == "count"] + [tile for tile in tiles if tile["kind"] != "count"]
+    bars = None
+    if len(bar_series) > 0 and len(rows) > 0:
+        labels = []
+        for row in rows:
+            label = to_text(row.get("Parent_ROI_Name", ""))
+            if len(set([to_text(other.get("Frame", "")) for other in rows])) > 1:
+                label = label + " (frame " + to_text(row.get("Frame", "")) + ")"
+            labels.append(label)
+        bars = {"labels": labels, "series": bar_series}
+    return {"tiles": tiles, "bars": bars, "regions": len(rows)}
+
+
+def results_pictures(run_dir):
+    """Small copies of the first overlay pictures of a run, as
+    (caption, java.awt.Image) pairs. Never raises."""
+    pictures = []
+    try:
+        folder = os.path.join(to_text(run_dir), "Overlays")
+        if not os.path.isdir(folder):
+            return pictures
+        for name in sorted(os.listdir(folder)):
+            if len(pictures) >= RESULTS_MAX_PICTURES:
+                break
+            if not to_text(name).lower().endswith(".tif"):
+                continue
+            imp = IJ.openImage(os.path.join(folder, name))
+            if imp is None:
+                continue
+            try:
+                processor = imp.getProcessor()
+                longest = max(processor.getWidth(), processor.getHeight())
+                if longest > RESULTS_PICTURE_SIZE:
+                    factor = RESULTS_PICTURE_SIZE / float(longest)
+                    processor.setInterpolationMethod(ImageProcessor.BILINEAR)
+                    processor = processor.resize(
+                        max(1, int(processor.getWidth() * factor)), max(1, int(processor.getHeight() * factor)), True
+                    )
+                caption = to_text(name)
+                marker = caption.find("_C")
+                if "_Objects_Overlay" in caption and marker >= 0:
+                    caption = caption[marker + 1:caption.index("_Objects_Overlay")].replace("_", " ") + " - detected objects"
+                pictures.append((caption, processor.getBufferedImage()))
+            finally:
+                safe_close_image(imp)
+    except ANY_ERROR:
+        pass
+    return pictures
+
+
+class HeaderPanel(JPanel):
+    """The banner at the top of the window."""
+
+    def paintComponent(self, graphics):
+        width = self.getWidth()
+        height = self.getHeight()
+        look_smooth(graphics)
+        graphics.setPaint(GradientPaint(0.0, 0.0, Color(15, 23, 42), float(width), float(height), Color(13, 74, 82)))
+        graphics.fill(RoundRectangle2D.Float(0.0, 0.0, float(width), float(height), 18.0, 18.0))
+        # A few soft "cells" on the right, so the banner says what the tool is for.
+        spots = [(0.80, 0.30, 46, 60), (0.87, 0.72, 30, 80), (0.93, 0.34, 22, 110), (0.74, 0.78, 16, 70), (0.97, 0.80, 12, 120)]
+        for spot in spots:
+            graphics.setColor(Color(45, 212, 191, spot[3] // 3))
+            radius = spot[2]
+            graphics.fillOval(int(width * spot[0]) - radius, int(height * spot[1]) - radius, 2 * radius, 2 * radius)
+            graphics.setColor(Color(94, 234, 212, spot[3]))
+            graphics.fillOval(int(width * spot[0]) - radius // 3, int(height * spot[1]) - radius // 3, 2 * (radius // 3), 2 * (radius // 3))
+
+
+class ResultsCanvas(JPanel):
+    """Draws the tiles, the chart and the overlay pictures of one run."""
+
+    def __init__(self):
+        JPanel.__init__(self)
+        self.data = None
+        self.pictures = []
+        self.progress = 1.0
+        self.setOpaque(True)
+
+    def paintComponent(self, graphics):
+        self.super__paintComponent(graphics)
+        look_smooth(graphics)
+        width = self.getWidth()
+        height = self.getHeight()
+        dark = look_is_dark()
+        back = look_color("Panel.background", Color(245, 245, 245))
+        text = look_color("Label.foreground", Color.black)
+        faint = look_mix(text, back, 0.45)
+        card = look_mix(back, Color.white if dark else Color.black, 0.06)
+        if self.data is None or (len(self.data["tiles"]) == 0 and len(self.pictures) == 0):
+            self.paint_empty(graphics, width, height, text, faint)
+            return
+        margin = 18
+        gap = 14
+        top = margin
+        tiles = self.data["tiles"]
+        if len(tiles) > 0:
+            columns = min(len(tiles), 4)
+            tile_rows = (len(tiles) + columns - 1) // columns
+            tile_width = (width - 2 * margin - gap * (columns - 1)) / float(columns)
+            tile_height = 132
+            for index in range(len(tiles)):
+                left = margin + (index % columns) * (tile_width + gap)
+                self.paint_tile(graphics, tiles[index], left, top + (index // columns) * (tile_height + gap),
+                                tile_width, tile_height, card, text, faint)
+            top += tile_rows * (tile_height + gap)
+        rest = height - top - margin
+        if rest < 120:
+            return
+        bars = self.data["bars"]
+        picture_count = len(self.pictures)
+        chart_width = width - 2 * margin
+        if bars is not None and picture_count > 0:
+            chart_width = int((width - 2 * margin - gap) * 0.42)
+        if bars is not None:
+            self.paint_chart(graphics, bars, margin, top, chart_width, rest, card, text, faint)
+        if picture_count > 0:
+            left = margin if bars is None else margin + chart_width + gap
+            area = width - margin - left
+            each = (area - gap * (picture_count - 1)) / float(picture_count)
+            for index in range(picture_count):
+                self.paint_picture(graphics, self.pictures[index], left + index * (each + gap), top, each, rest, card, faint)
+
+    def paint_empty(self, graphics, width, height, text, faint):
+        graphics.setColor(LOOK_ACCENT)
+        graphics.setStroke(BasicStroke(3.0))
+        graphics.drawOval(width // 2 - 34, height // 2 - 96, 68, 68)
+        graphics.fillOval(width // 2 - 10, height // 2 - 72, 20, 20)
+        base = self.getFont()
+        graphics.setFont(base.deriveFont(Font.BOLD, 22.0))
+        graphics.setColor(text)
+        headline = "No results yet"
+        graphics.drawString(headline, (width - graphics.getFontMetrics().stringWidth(headline)) // 2, height // 2 + 14)
+        graphics.setFont(base.deriveFont(Font.PLAIN, 14.0))
+        graphics.setColor(faint)
+        hint = "Open an image on the Session tab and press '3. Run analysis'. The numbers and pictures appear here."
+        graphics.drawString(hint, (width - graphics.getFontMetrics().stringWidth(hint)) // 2, height // 2 + 42)
+
+    def paint_tile(self, graphics, tile, left, top, width, height, card, text, faint):
+        graphics.setColor(card)
+        graphics.fill(RoundRectangle2D.Float(left, top, width, height, 18.0, 18.0))
+        graphics.setColor(tile["color"])
+        graphics.fill(RoundRectangle2D.Float(left + 16, top + 18, 5.0, height - 36.0, 5.0, 5.0))
+        base = self.getFont()
+        graphics.setFont(base.deriveFont(Font.BOLD, 13.0))
+        graphics.setColor(faint)
+        graphics.drawString(tile["title"].upper(), int(left + 34), int(top + 34))
+        shown = tile["value"] * self.progress
+        if tile["kind"] == "percent":
+            figure = "%.1f%%" % shown
+        else:
+            figure = format_count(shown)
+        graphics.setFont(base.deriveFont(Font.BOLD, 44.0))
+        graphics.setColor(text)
+        graphics.drawString(figure, int(left + 34), int(top + 84))
+        graphics.setFont(base.deriveFont(Font.PLAIN, 12.0))
+        graphics.setColor(faint)
+        graphics.drawString(tile["note"], int(left + 34), int(top + 110))
+        if tile["kind"] == "percent" and width > 300:
+            size = 76.0
+            ring_left = left + width - size - 26
+            ring_top = top + (height - size) / 2.0
+            graphics.setStroke(BasicStroke(9.0, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND))
+            graphics.setColor(look_mix(card, text, 0.12))
+            graphics.draw(Arc2D.Float(ring_left, ring_top, size, size, 0.0, 360.0, Arc2D.OPEN))
+            graphics.setColor(tile["color"])
+            sweep = -360.0 * max(0.0, min(100.0, shown)) / 100.0
+            graphics.draw(Arc2D.Float(ring_left, ring_top, size, size, 90.0, sweep, Arc2D.OPEN))
+
+    def paint_chart(self, graphics, bars, left, top, width, height, card, text, faint):
+        graphics.setColor(card)
+        graphics.fill(RoundRectangle2D.Float(left, top, width, height, 18.0, 18.0))
+        base = self.getFont()
+        graphics.setFont(base.deriveFont(Font.BOLD, 13.0))
+        graphics.setColor(faint)
+        graphics.drawString("OBJECTS PER REGION", int(left + 20), int(top + 30))
+        series = bars["series"]
+        labels = bars["labels"]
+        # Legend
+        graphics.setFont(base.deriveFont(Font.PLAIN, 12.0))
+        metrics = graphics.getFontMetrics()
+        legend_left = left + 20
+        for entry in series:
+            graphics.setColor(entry["color"])
+            graphics.fill(RoundRectangle2D.Float(legend_left, top + 44, 12.0, 12.0, 4.0, 4.0))
+            graphics.setColor(text)
+            graphics.drawString(entry["name"], int(legend_left + 18), int(top + 55))
+            legend_left += 18 + metrics.stringWidth(entry["name"]) + 18
+        highest = 0.0
+        for entry in series:
+            for number in entry["values"]:
+                if number is not None and number > highest:
+                    highest = number
+        if highest <= 0:
+            highest = 1.0
+        plot_left = left + 24
+        plot_right = left + width - 24
+        plot_top = top + 86
+        plot_bottom = top + height - 40
+        if plot_bottom - plot_top < 40 or len(labels) == 0:
+            return
+        graphics.setStroke(BasicStroke(1.0))
+        graphics.setColor(look_mix(card, text, 0.18))
+        graphics.drawLine(int(plot_left), int(plot_bottom), int(plot_right), int(plot_bottom))
+        group_width = (plot_right - plot_left) / float(len(labels))
+        bar_width = min(46.0, (group_width * 0.72) / len(series))
+        for group in range(len(labels)):
+            start = plot_left + group * group_width + (group_width - bar_width * len(series)) / 2.0
+            for position in range(len(series)):
+                number = series[position]["values"][group]
+                if number is None:
+                    continue
+                bar_height = (plot_bottom - plot_top) * (number / highest) * self.progress
+                bar_left = start + position * bar_width
+                graphics.setColor(series[position]["color"])
+                graphics.fill(RoundRectangle2D.Float(bar_left + 2, plot_bottom - bar_height, bar_width - 4, bar_height, 8.0, 8.0))
+                if bar_height > 6:
+                    graphics.fillRect(int(bar_left + 2), int(plot_bottom - min(bar_height, 6)), int(bar_width - 4), int(min(bar_height, 6)))
+                if len(labels) * len(series) <= 24:
+                    figure = format_count(number * self.progress)
+                    graphics.setColor(text)
+                    graphics.drawString(figure, int(bar_left + (bar_width - metrics.stringWidth(figure)) / 2.0),
+                                        int(plot_bottom - bar_height - 6))
+            label = labels[group]
+            while len(label) > 3 and metrics.stringWidth(label) > group_width - 6:
+                label = label[:-2]
+            graphics.setColor(faint)
+            graphics.drawString(label, int(plot_left + group * group_width + (group_width - metrics.stringWidth(label)) / 2.0),
+                                int(plot_bottom + 20))
+
+    def paint_picture(self, graphics, picture, left, top, width, height, card, faint):
+        graphics.setColor(card)
+        graphics.fill(RoundRectangle2D.Float(left, top, width, height, 18.0, 18.0))
+        image = picture[1]
+        room_width = width - 24
+        room_height = height - 54
+        if room_width < 20 or room_height < 20:
+            return
+        scale = min(room_width / float(image.getWidth()), room_height / float(image.getHeight()))
+        shown_width = int(image.getWidth() * scale)
+        shown_height = int(image.getHeight() * scale)
+        image_left = int(left + (width - shown_width) / 2.0)
+        image_top = int(top + 12 + (room_height - shown_height) / 2.0)
+        old_clip = graphics.getClip()
+        graphics.clip(RoundRectangle2D.Float(image_left, image_top, shown_width, shown_height, 12.0, 12.0))
+        graphics.drawImage(image, image_left, image_top, shown_width, shown_height, None)
+        graphics.setClip(old_clip)
+        graphics.setFont(self.getFont().deriveFont(Font.PLAIN, 12.0))
+        graphics.setColor(faint)
+        graphics.drawString(picture[0], int(left + 16), int(top + height - 16))
+
+
+class ResultsAnimation(ActionListener):
+    """Lets the numbers and bars of the Results tab grow for half a second."""
+
+    def __init__(self, canvas):
+        self.canvas = canvas
+        self.started = time.time()
+        self.timer = SwingTimer(16, self)
+
+    def actionPerformed(self, event):
+        elapsed = (time.time() - self.started) / 0.6
+        if elapsed >= 1.0:
+            self.canvas.progress = 1.0
+            self.timer.stop()
+        else:
+            # Ease out: fast at first, slow at the end.
+            self.canvas.progress = 1.0 - (1.0 - elapsed) ** 3
+        self.canvas.repaint()
+
+
+class LookWindowListener(WindowAdapter):
+    """Puts Fiji's own look back when the window has closed."""
+
+    def windowClosed(self, event):
+        look_restore()
+
+
+# -----------------------------------------------------------------------------
 # Main application
 # -----------------------------------------------------------------------------
 
@@ -549,6 +1074,12 @@ class CellQuantStudioUniversal(JFrame):
         # ID of the source image whose unsaved changes the user has accepted.
         self.accepted_changes_id = None
 
+        # What the Results tab shows: set by show_results().
+        self.results_animation = None
+
+        if look_preference() == LOOK_DARK:
+            look_install()
+        self.addWindowListener(LookWindowListener())
         self.build_ui()
         self.apply_preset_by_name(PRESET_NAMES[0])
         self.setVisible(True)
@@ -556,20 +1087,13 @@ class CellQuantStudioUniversal(JFrame):
     # ----- UI construction ----------------------------------------------------
 
     def build_ui(self):
-        root = JPanel(BorderLayout(8, 8))
-        root.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8))
-
-        header = JPanel(BorderLayout())
-        title = JLabel(APP_NAME + "  " + APP_VERSION)
-        title.setFont(Font("SansSerif", Font.BOLD, 18))
-        subtitle = JLabel("One Fiji application for channel preparation, independent masks, ROI measurements, object quantification, batches, and validation")
-        subtitle.setFont(Font("SansSerif", Font.PLAIN, 12))
-        header.add(title, BorderLayout.NORTH)
-        header.add(subtitle, BorderLayout.SOUTH)
-        root.add(header, BorderLayout.NORTH)
+        root = JPanel(BorderLayout(8, 10))
+        root.setBorder(BorderFactory.createEmptyBorder(10, 12, 8, 12))
+        root.add(self.build_header(), BorderLayout.NORTH)
 
         self.main_tabs = JTabbedPane()
         self.main_tabs.add("Session", self.build_session_tab())
+        self.main_tabs.add(RESULTS_TAB_TITLE, self.build_results_tab())
         self.main_tabs.add("Channels", self.build_channels_tab())
         self.main_tabs.add("ROIs and output", self.build_roi_output_tab())
         self.main_tabs.add("Batch", self.build_batch_tab())
@@ -581,6 +1105,100 @@ class CellQuantStudioUniversal(JFrame):
         root.add(self.build_job_bar(), BorderLayout.SOUTH)
 
         self.getContentPane().add(root)
+        self.style_buttons(root)
+
+    def build_header(self):
+        """The banner: name, one line on what the tool does, and the look."""
+        header = HeaderPanel(BorderLayout(12, 0))
+        header.setOpaque(False)
+        header.setBorder(BorderFactory.createEmptyBorder(16, 24, 16, 20))
+        words = JPanel()
+        words.setOpaque(False)
+        words.setLayout(BoxLayout(words, BoxLayout.Y_AXIS))
+        title = JLabel(APP_NAME)
+        title.setFont(Font("SansSerif", Font.BOLD, 26))
+        title.setForeground(Color.white)
+        subtitle = JLabel(
+            "Count cells and measure markers in fluorescence microscopy images, the same way every time.  Version " + APP_VERSION
+        )
+        subtitle.setFont(Font("SansSerif", Font.PLAIN, 13))
+        subtitle.setForeground(Color(203, 213, 225))
+        words.add(title)
+        words.add(subtitle)
+        side = JPanel(FlowLayout(FlowLayout.RIGHT))
+        side.setOpaque(False)
+        look_label = JLabel("Look")
+        look_label.setForeground(Color(203, 213, 225))
+        self.look_combo = JComboBox(LOOK_NAMES)
+        self.look_combo.setSelectedItem(look_preference())
+        self.look_combo.setToolTipText(
+            "Dark switches the whole of Fiji to its dark theme while this window is open. The choice is remembered."
+        )
+        self.look_combo.addActionListener(self.look_changed)
+        side.add(look_label)
+        side.add(self.look_combo)
+        header.add(words, BorderLayout.CENTER)
+        header.add(side, BorderLayout.EAST)
+        return header
+
+    def look_changed(self, event=None):
+        chosen = to_text(self.look_combo.getSelectedItem())
+        try:
+            Prefs.set(LOOK_PREF_KEY, chosen)
+        except ANY_ERROR:
+            pass
+        if chosen == LOOK_DARK:
+            look_install()
+        else:
+            look_restore()
+        self.repaint()
+
+    def style_buttons(self, container):
+        """Round every button that has no style of its own yet."""
+        for child in container.getComponents():
+            if isinstance(child, JButton):
+                if child.getClientProperty("FlatLaf.style") is None:
+                    style_button(child)
+            elif hasattr(child, "getComponents"):
+                self.style_buttons(child)
+
+    def build_results_tab(self):
+        """The latest analysis as a picture: headline numbers, a chart of the
+        object counts per region, and the overlay images. The tables and
+        files of the run are unchanged; this only shows them."""
+        panel = JPanel(BorderLayout(8, 8))
+        self.results_canvas = ResultsCanvas()
+        self.results_caption = JLabel("The latest analysis is shown here.")
+        self.results_caption.setFont(Font("SansSerif", Font.PLAIN, 13))
+        bar = JPanel(BorderLayout())
+        bar.setBorder(BorderFactory.createEmptyBorder(8, 18, 0, 12))
+        bar.add(self.results_caption, BorderLayout.CENTER)
+        buttons = JPanel(FlowLayout(FlowLayout.RIGHT))
+        buttons.add(JButton("Show result files", actionPerformed=self.open_last_output_folder))
+        bar.add(buttons, BorderLayout.EAST)
+        panel.add(bar, BorderLayout.NORTH)
+        panel.add(self.results_canvas, BorderLayout.CENTER)
+        return panel
+
+    def show_results(self, result, configs, run_dir, source_title=""):
+        """Event thread: fill the Results tab from a finished analysis and
+        bring it to the front. A failure here never fails the analysis."""
+        try:
+            self.results_canvas.data = results_from_summary(result["summary_headers"], result["summary_rows"], configs)
+            self.results_canvas.pictures = results_pictures(run_dir)
+            regions = self.results_canvas.data["regions"]
+            self.results_caption.setText(
+                to_text(source_title) + "   -   " + str(regions) + (" region" if regions == 1 else " regions") +
+                "   -   " + time.strftime("%H:%M:%S")
+            )
+            if self.results_animation is not None:
+                self.results_animation.timer.stop()
+            self.results_canvas.progress = 0.0
+            self.results_animation = ResultsAnimation(self.results_canvas)
+            self.results_animation.timer.start()
+            self.main_tabs.setSelectedIndex(self.main_tabs.indexOfTab(RESULTS_TAB_TITLE))
+        except ANY_ERROR as exc:
+            self.append_status("The Results tab could not be filled: " + to_text(exc))
 
     def build_job_bar(self):
         """The strip under the tabs that shows a background job (an analysis,
@@ -651,9 +1269,9 @@ class CellQuantStudioUniversal(JFrame):
         actions.add(JButton("Open selected image", actionPerformed=self.open_selected_image))
         actions.add(JButton("Open via Bio-Formats", actionPerformed=self.open_selected_with_bioformats))
         actions.add(JButton("Use active image", actionPerformed=self.use_active_image))
-        actions.add(JButton("1. Prepare enabled channels", actionPerformed=self.prepare_enabled_channels))
-        actions.add(JButton("2. Preview all masks", actionPerformed=self.preview_all_masks))
-        actions.add(JButton("3. Run analysis", actionPerformed=self.run_analysis_action))
+        actions.add(style_button(JButton("1. Prepare enabled channels", actionPerformed=self.prepare_enabled_channels), "step"))
+        actions.add(style_button(JButton("2. Preview all masks", actionPerformed=self.preview_all_masks), "step"))
+        actions.add(style_button(JButton("3. Run analysis", actionPerformed=self.run_analysis_action), "primary"))
         actions.add(JButton("Quick run", actionPerformed=self.quick_run_action))
         actions.add(JButton("Reset for next image", actionPerformed=self.reset_for_next_image))
 
@@ -693,7 +1311,7 @@ class CellQuantStudioUniversal(JFrame):
         self.status_area.setEditable(False)
         self.status_area.setLineWrap(True)
         self.status_area.setWrapStyleWord(True)
-        self.status_area.setFont(Font("Monospaced", Font.PLAIN, 11))
+        self.status_area.setFont(Font("Monospaced", Font.PLAIN, 12))
         self.status_area.setBorder(BorderFactory.createTitledBorder("Status and run log"))
         self.append_status("Ready.")
 
@@ -2614,6 +3232,7 @@ class CellQuantStudioUniversal(JFrame):
             self.source_path = ""
             self.update_source_info()
 
+        self.show_results(result, values["configs"], values["run_dir"], values["source"].getTitle())
         self.show_job_result("Analysis complete.", values["run_dir"], warning)
 
     def show_job_result(self, headline, run_dir, warning=""):

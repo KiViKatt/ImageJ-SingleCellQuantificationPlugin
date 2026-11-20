@@ -17,6 +17,17 @@ Built-in tools check the results: object counts against manual point marks, mask
 
 > **Version 2.3.0.** This version has been run and tested in a real Fiji (Jython 2.7.4, ImageJ 1.54p, Java 21) and on the author's Zeiss CZI images. Upgrading from 2.2.x? Read [CHANGELOG.md](CHANGELOG.md) first: some results change on purpose. The earlier macros are kept in [legacy/](legacy/) and are not covered here.
 
+![The Results tab after an analysis: headline numbers, objects per region, and the overlay picture](docs/images/results_tab.jpg)
+
+*The Results tab after an analysis of a synthetic test image.*
+
+## Look and Results tab
+
+- **Results tab.** After "3. Run analysis" the window shows the run as a picture: one large number per measurement (objects counted, share of the area that is marker-positive), a chart of the object counts per parent ROI, and the object overlay image. Counts are added up over the parent ROIs; a positive-area share is the positive area of all ROIs divided by their area. Nothing new is measured or written: the numbers come from `roi_summary.csv`, which remains the record.
+- **Dark look.** The window opens in a dark theme (Fiji's own FlatLaf dark theme). A Swing theme applies to every Fiji window, so Fiji turns dark while Cell Quant Studio is open and gets its previous look back when the window closes. Choose **Look > Fiji default** at the top right to leave Fiji as it is; the choice is remembered.
+
+![The Session tab in the dark look](docs/images/session_tab.jpg)
+
 ## Capabilities
 
 | Area | What you can do |
@@ -429,7 +440,7 @@ The automated tests build synthetic images with known answers and check the resu
   bash tests/run_tests.sh /path/to/Fiji.app "$PWD/tests/gui_smoke.py"
   ```
 
-  The first runs the engine and module tests (125 tests, about 4300 checks, about 1 minute). The second runs the window test (29 steps); it opens windows for about half a minute.
+  The first runs the engine and module tests (125 tests, about 4300 checks, about 1 minute). The second runs the window test (30 steps); it opens windows for about half a minute.
 - **Selected tests only:** set `CELLQUANT_TEST_FILTER=word`.
 - **Large images:** set `CELLQUANT_JAVA_OPTS=-Xmx16g`.
 
