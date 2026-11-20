@@ -6,7 +6,8 @@ A working note for the maintainer. Delete it once the steps are done.
 
 - In the real Fiji on the development PC (Jython 2.7.4, ImageJ 1.54p, Java 21):
   - 123 engine and module tests, 4296 checks, all pass;
-  - the 28-step automated window test passes.
+  - the 29-step automated window test passes.
+- On macOS (Apple silicon, same Fiji versions): both automated tests pass. No real image was used there.
 - On the author's Zeiss CZI files (read-only):
   - A 2.3 run reproduces the 2.2 run of 2026-11-18 exactly for channels 2-4. That covers every summary column and all 36,453 object rows.
   - Channel 1 of that 2.2 run was measured on an image edited in memory; see CHANGELOG.
@@ -16,7 +17,7 @@ A working note for the maintainer. Delete it once the steps are done.
 
 Not tested yet:
 
-- macOS and Linux;
+- Linux;
 - a person using the window by hand on real data after the last round of changes;
 - time-lapse CZI files and multi-series files with label images (only synthetic ones);
 - Excel or File Explorer on result paths over 259 characters (they are now shortened);

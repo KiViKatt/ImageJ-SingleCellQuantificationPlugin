@@ -49,7 +49,7 @@ from ij.plugin import RoiScaler
 from ij.plugin.filter import GaussianBlur, RankFilters
 from ij.process import (
     AutoThresholder, ByteProcessor, FloatProcessor, FloodFiller,
-    ImageProcessor, ImageStatistics, Blitter, LUT
+    ImageProcessor, ImageStatistics, Blitter, LUT, ColorProcessor
 )
 from java.awt import Color
 
@@ -735,11 +735,32 @@ def tissue_qc_image(planes, rois, label=""):
         picture.draw(RoiScaler.scale(clone_roi(roi), scale_x, scale_y, False))
     if label != "":
         try:
-            picture.setLineWidth(1)
-            picture.drawString(to_text(label), 6, 18)
+            tissue_draw_label(picture, to_text(label), 6, 18)
         except ANY_ERROR:
             pass
     return ImagePlus("Tissue outline check", picture)
+
+
+def tissue_draw_label(picture, text, x, y):
+    """Write text in plain yellow, with no blended edge pixels.
+
+    Some systems (macOS) always smooth text, which leaves pixels between
+    yellow and gray around every letter. The text is therefore drawn on a
+    separate black strip and only the pixels that are at least half covered
+    are set, so the picture is the same on every system."""
+    strip_width = min(picture.getWidth(), x + picture.getStringWidth(text) + 8)
+    strip_height = min(picture.getHeight(), y + 12)
+    if strip_width <= 0 or strip_height <= 0:
+        return
+    strip = ColorProcessor(strip_width, strip_height)
+    strip.setColor(Color.white)
+    strip.setFont(picture.getFont())
+    strip.drawString(text, x, y)
+    yellow = Color.yellow.getRGB()
+    for row in range(strip_height):
+        for column in range(strip_width):
+            if (strip.get(column, row) & 0xff) >= 128:
+                picture.set(column, row, yellow)
 
 
 def save_tissue_qc(path, planes, rois, label=""):

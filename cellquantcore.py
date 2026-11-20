@@ -1813,10 +1813,10 @@ class CellQuantStudioUniversal(JFrame):
         count = self.source_imp.getNChannels() if self.source_imp is not None else MAX_CHANNELS
         for i in range(MAX_CHANNELS):
             enabled = i < count
+            # Only the tab is switched off. The channel's settings stay as
+            # they are, so that an image with fewer channels does not erase
+            # them; collect_channel_configs leaves such channels out.
             self.channel_tabs.setEnabledAt(i, enabled)
-            if not enabled:
-                self.channel_panels[i].enabled_cb.setSelected(False)
-                self.channel_panels[i].analysis_combo.setSelectedItem("Ignore")
 
     def populate_calibration_fields(self):
         if self.source_imp is None:
@@ -1876,11 +1876,18 @@ class CellQuantStudioUniversal(JFrame):
 
     # ----- configuration collection and validation ---------------------------
 
-    def collect_channel_configs(self):
+    def collect_channel_configs(self, limit_to_source=True):
+        # limit_to_source leaves out the channels that the open image does
+        # not have. Jobs that read a folder of other images pass False.
+        available = MAX_CHANNELS
+        if limit_to_source and self.source_imp is not None:
+            available = self.source_imp.getNChannels()
         configs = []
         for panel in self.channel_panels:
             analysis_mode = to_text(panel.analysis_combo.getSelectedItem())
             if not panel.enabled_cb.isSelected() or analysis_mode == "Ignore":
+                continue
+            if panel.channel_number > available:
                 continue
             config = panel.get_config()
             configs.append(config)
@@ -2216,6 +2223,20 @@ class CellQuantStudioUniversal(JFrame):
     def apply_lut(self, imp, lut_name):
         apply_lut(imp, lut_name)
 
+    def require_display_range_current(self, configs, target):
+        # A display-minimum threshold is the Brightness/Contrast minimum set
+        # by eye on one prepared image. Once that image has to be rebuilt the
+        # setting is gone, so stop instead of thresholding at a default.
+        if not (self.needs_mask(target) and target["threshold_mode"] == "Display minimum"):
+            return
+        if self.prepared_cache_valid(configs, self.source_imp.getFrame()):
+            return
+        raise ValueError(
+            "Display-minimum thresholding requires the current prepared images. "
+            "Click '1. Prepare enabled channels', adjust Brightness/Contrast for C" +
+            str(target["channel"]) + " (" + target["name"] + "), and try again without changing preprocessing settings."
+        )
+
     def ensure_current_prepared(self, configs):
         frame = self.source_imp.getFrame()
         if not self.prepared_cache_valid(configs, frame):
@@ -2250,6 +2271,13 @@ class CellQuantStudioUniversal(JFrame):
         try:
             configs = self.collect_channel_configs()
             self.validate_configs(configs, for_analysis=False)
+            if not self.prepared_cache_valid(configs, self.source_imp.getFrame()):
+                # Preparing now would capture a default display range, not
+                # the one that was set by eye.
+                raise ValueError(
+                    "There is no current prepared image to capture from. Click '1. Prepare enabled channels', "
+                    "adjust Brightness/Contrast for C" + str(channel_number) + ", and capture again."
+                )
             prepared = self.ensure_current_prepared(configs)
             imp = prepared.get(channel_number)
             if imp is None:
@@ -2785,7 +2813,7 @@ class CellQuantStudioUniversal(JFrame):
         if self.blocked_by_batch():
             return
         try:
-            configs = self.collect_channel_configs()
+            configs = self.collect_channel_configs(limit_to_source=False)
             if len(configs) == 0:
                 raise ValueError("No channels are enabled for analysis.")
             validate_unattended_configs(configs, "Batch processing")
@@ -2953,6 +2981,7 @@ class CellQuantStudioUniversal(JFrame):
         for imp in self.prepared_images.values():
             if imp is not None:
                 selections.append(imp.getRoi())
+        self.require_display_range_current(configs, target)
         frame = self.source_imp.getFrame()
         if prepare_now:
             prepared = self.ensure_current_prepared(configs)
@@ -3226,7 +3255,7 @@ class CellQuantStudioUniversal(JFrame):
         self.start_background("Tuning", self.collect_tuning_job, self.tuning_work, self.tuning_finished, "Tuning failed")
 
     def collect_tuning_job(self):
-        configs = self.collect_channel_configs()
+        configs = self.collect_channel_configs(limit_to_source=False)
         if len(configs) == 0:
             raise ValueError("No channels are enabled for analysis.")
         options = self.collect_global_options()
@@ -3354,7 +3383,7 @@ class CellQuantStudioUniversal(JFrame):
 
     def collect_robustness_job(self):
         """The same inputs as a batch (Batch tab), plus the robust_* settings."""
-        configs = self.collect_channel_configs()
+        configs = self.collect_channel_configs(limit_to_source=False)
         if len(configs) == 0:
             raise ValueError("No channels are enabled for analysis.")
         validate_unattended_configs(configs, "Robustness analysis")
