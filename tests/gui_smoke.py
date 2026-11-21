@@ -52,6 +52,7 @@ import threading
 ANY_ERROR = (Exception, JavaThrowable)
 
 MICRO = b"\xc2\xb5".decode("utf-8")
+SQUARED = b"\xc2\xb2".decode("utf-8")
 WIDTH = 240
 HEIGHT = 200
 PIXEL = 0.5
@@ -789,6 +790,207 @@ def step_prepare_and_preview(ctx, t):
     t.equal([app.prepared_images[channel].getID() for channel in [1, 2, 3]], ctx.prepared_ids, "refreshing reuses current prepared images")
 
 
+def check_research_helpers(ns, t):
+    """The tables of the Researcher view of the Results tab, worked out
+    from a summary table and a threshold table."""
+    t.equal(ns["format_fixed"](1234567.891, 1), "1,234,567.9", "a number with thousands separators and one decimal")
+    t.equal(ns["format_fixed"](-0.5, 2), "-0.50", "a negative number keeps its sign")
+    t.equal(ns["format_research_value"](None, "count"), "-", "a missing value is a dash")
+    t.equal(ns["format_research_value"](12345.6, "area"), "12,346", "a large area has no decimals")
+    t.equal(ns["format_research_value"](3.14159, "area"), "3.14", "a small area has two")
+    t.equal(ns["format_research_value"](42.888, "percent"), "42.89", "a percentage has two decimals")
+    t.equal(ns["format_research_value"](548.0, "threshold"), "548", "a whole threshold is written without decimals")
+    t.equal(ns["format_research_value"](0.25, "threshold"), "0.25", "a fractional threshold keeps its digits")
+    headers = [
+        "Parent_ROI_Name", "ROI_Area", "ROI_Area_Unit",
+        "C1_A_Mean", "C1_A_StdDev", "C1_A_Raw_Integrated_Density",
+        "C1_A_Object_Count", "C1_A_Object_Density_Per_mm2", "C1_A_Edge_Touching_Object_Count",
+        "C2_B_Mean", "C2_B_StdDev", "C2_B_Raw_Integrated_Density",
+        "C2_B_Positive_Area", "C2_B_Positive_Area_Fraction_Percent", "C2_B_Positive_Area_Mean_Depth"
+    ]
+
+    def line(name, area, count, density, positive, share):
+        return {
+            "Parent_ROI_Name": name, "ROI_Area": area, "ROI_Area_Unit": "micron^2", "Frame": 1,
+            "C1_A_Mean": 10.0, "C1_A_StdDev": 1.0, "C1_A_Raw_Integrated_Density": 5.0,
+            "C1_A_Object_Count": count, "C1_A_Object_Density_Per_mm2": density, "C1_A_Edge_Touching_Object_Count": 1,
+            "C2_B_Mean": 7.5, "C2_B_StdDev": 1.0, "C2_B_Raw_Integrated_Density": 5.0,
+            "C2_B_Positive_Area": positive, "C2_B_Positive_Area_Fraction_Percent": share, "C2_B_Positive_Area_Mean_Depth": 4.0
+        }
+    rows = [line("one", 100.0, 3, 30000.0, 10.0, 10.0), line("two", 300.0, 5, 5 / 300e-6, 150.0, 50.0)]
+    table = ns["results_table_from_summary"](headers, rows, [])
+    area_title = "Area (" + MICRO + "m" + SQUARED + ")"
+    t.equal([as_text(column["title"]) for column in table["columns"]],
+            ["Region", area_title, "A objects", "A per mm" + SQUARED, "A mean", "B area %", "B mean"],
+            "per channel: count and density when it detects objects, area share when it measures one, and its mean")
+    t.equal([column["key"] for column in table["columns"]],
+            ["Parent_ROI_Name", "ROI_Area", "C1_A_Object_Count", "C1_A_Object_Density_Per_mm2", "C1_A_Mean",
+             "C2_B_Positive_Area_Fraction_Percent", "C2_B_Mean"], "every column names its column of the summary table")
+    t.equal(table["rows"][0], ["one", 100.0, 3.0, 30000.0, 10.0, 10.0, 7.5], "a line holds the values of the summary table")
+    total = table["sum"]
+    t.equal(total[:3], ["Sum of regions", 400.0, 8.0], "the sum line adds up areas and counts")
+    t.close(total[3], 8 / 400e-6, "its density is all objects over all of the area")
+    t.equal(total[4:], ["", 40.0, ""], "its area share is weighted by area, and mean intensities are left out")
+    t.equal(ns["results_table_from_summary"](headers, rows[:1], [])["sum"], None, "one region has no sum line")
+    framed = [line("one", 100.0, 3, 30000.0, 10.0, 10.0), line("one", 100.0, 4, 40000.0, 10.0, 10.0)]
+    framed[1]["Frame"] = 2
+    by_frame = ns["results_table_from_summary"](headers, framed, [])
+    t.equal([values[0] for values in by_frame["rows"]], ["one (frame 1)", "one (frame 2)"], "frames are told apart by name")
+    t.equal(by_frame["sum"], None, "and are not added up")
+    gap = [line("one", 100.0, 3, 30000.0, 10.0, 10.0), line("two", 300.0, 5, 5 / 300e-6, 150.0, 50.0)]
+    del gap[1]["C1_A_Object_Count"]
+    holed = ns["results_table_from_summary"](headers, gap, [])
+    t.equal(holed["rows"][1][2], None, "a missing value stays missing")
+    t.equal(holed["sum"][2:4], [None, None], "and so do the sums that need it")
+    empty = [line("one", 100.0, 0, 0.0, 0.0, 0.0), line("two", 300.0, 0, 0.0, 0.0, 0.0)]
+    t.equal(ns["results_table_from_summary"](headers, empty, [])["sum"][2:4], [0.0, 0.0], "regions without objects sum to zero")
+    named = ns["results_table_from_summary"](headers, rows, [{"channel": 1, "name": "DAPI"}])
+    t.equal(as_text(named["columns"][2]["title"]), "DAPI objects", "a channel is called as in the settings")
+    text = as_text(ns["results_table_text"](table))
+    lines = text.split("\n")
+    t.equal(lines[0].split("\t"), [as_text(column["long"]) for column in table["columns"]], "the copied table starts with the titles in full")
+    t.equal([as_text(column["long"]) for column in table["columns"]],
+            ["Region", area_title, "A objects", "A objects per mm" + SQUARED, "A mean intensity", "B positive area (%)",
+             "B mean intensity"], "every column has a name in full")
+    t.equal(lines[1].split("\t"), ["one", "100.0", "3", "30000.0", "10.0", "10.0", "7.5"], "then one line per region, values in full")
+    t.check(lines[3].startswith("Sum of regions\t400.0\t8\t") and text.endswith("\n") and len(lines) == 5, "and the sum line last")
+    t.equal(as_text(ns["results_table_text"](holed)).split("\n")[2].split("\t")[2], "", "a missing value is copied as an empty cell")
+    t.equal(ns["results_table_text"](None), "", "nothing to copy before the first run")
+    t.equal(ns["results_table_text"](ns["results_table_from_summary"]([], [], [])), "", "nor from an empty table")
+    # Few regions: one column per region, so that every value is in view.
+    shape = ns["results_table_layout"](table)
+    t.check(shape["across"], "with few regions the table has one column per region")
+    t.equal([as_text(title) for title in shape["titles"]], ["Measurement", "one", "two", "Sum of regions"],
+            "its columns are the regions and their sum")
+    t.equal([[as_text(cell) for cell in shown] for shown in shape["lines"][:3]],
+            [[area_title, "100", "300", "400"], ["A objects", "3", "5", "8"],
+             ["A objects per mm" + SQUARED, "30,000.0", "16,666.7", "20,000.0"]], "and its lines the measurements")
+    t.equal(as_text(shape["lines"][3][3]), "", "a mean intensity has no sum")
+    t.equal(len(shape["lines"]), len(table["columns"]) - 1, "one line per measurement")
+    t.equal((shape["right"], shape["bold_row"], shape["bold_column"]), ([False, True, True, True], None, 3),
+            "numbers are set to the right and the sums are set off")
+    t.equal(shape["tips"][1][:2], [None, "C1_A_Object_Count = 3.0"], "a value names its column of the summary table")
+    t.check(as_text(shape["tips"][1][3]).endswith("regions added up = 8.0") and shape["tips"][3][3] is None,
+            "a sum says what it is; an empty cell says nothing")
+    # Many regions: one line per region, as in the summary table.
+    many = [line("region %d" % number, 100.0, number, number / 100e-6, 10.0, 10.0) for number in range(1, 8)]
+    long_table = ns["results_table_from_summary"](headers, many, [])
+    rows_shape = ns["results_table_layout"](long_table)
+    t.check(not rows_shape["across"], "with many regions the table has one line per region")
+    t.equal([as_text(title) for title in rows_shape["titles"]], [as_text(column["title"]) for column in long_table["columns"]],
+            "under the short titles")
+    t.equal((len(rows_shape["lines"]), rows_shape["bold_row"], rows_shape["bold_column"]), (8, 7, None),
+            "every region and the sum line, which is set off")
+    t.equal([as_text(cell) for cell in rows_shape["lines"][7][:3]], ["Sum of regions", "700", "28"], "the sum line adds the regions up")
+    found = ns["results_thresholds_from_rows"]([
+        {"Frame": 1, "Channel": 1, "Channel_Name": "A", "Analysis_Mode": "Objects only", "Threshold_Mode": "Auto",
+         "Automatic_Method": "Otsu", "Automatic_Multiplier": 1.2, "Threshold_Low": 548.0, "Threshold_High": 17467.0},
+        {"Frame": 1, "Channel": 2, "Channel_Name": "B", "Analysis_Mode": "Positive area", "Threshold_Mode": "Local Phansalkar",
+         "Local_Radius": 35, "Threshold_Low": "", "Threshold_High": ""},
+        {"Frame": 1, "Channel": 3, "Channel_Name": "C", "Analysis_Mode": "Positive area", "Threshold_Mode": "Manual",
+         "Automatic_Method": "Otsu", "Automatic_Multiplier": 1.0, "Threshold_Low": 700.0, "Threshold_High": 4095.0}
+    ])
+    t.equal(found["rows"], [
+        ["C1 A", "Objects only", "Auto, Otsu x 1.2", 548.0, 17467.0],
+        ["C2 B", "Positive area", "Local Phansalkar, radius 35", None, None],
+        ["C3 C", "Positive area", "Manual", 700.0, 4095.0]
+    ], "the thresholds of a run: how each channel was thresholded, and its limits")
+    key = ns["RESULTS_VIEW_PREF_KEY"]
+    saved = Prefs.get(key, "")
+    try:
+        Prefs.set(key, ns["RESULTS_VIEW_PITCH"])
+        t.equal(ns["results_view_preference"](), "Pitch", "a remembered Pitch view stays Pitch")
+        Prefs.set(key, "Neon")
+        t.equal(ns["results_view_preference"](), "Researcher", "an unknown remembered view opens the Researcher view")
+    finally:
+        Prefs.set(key, saved)
+
+
+def check_results_views(ctx, t, app, window):
+    """The two views of the Results tab after an analysis: the tables of
+    the Researcher view hold the numbers of the summary table, and the
+    Researcher | Pitch switch shows one or the other."""
+    ns = ctx.ns
+    view = app.research_view
+    canvas = app.results_canvas
+    key = ns["RESULTS_VIEW_PREF_KEY"]
+    saved = Prefs.get(key, "")
+    try:
+        on_edt(lambda: app.set_results_view(ns["RESULTS_VIEW_RESEARCH"], False), "choosing the Researcher view")
+        settle(ctx)
+        t.check(view.isShowing() and not canvas.isShowing(), "the Researcher view shows the tables, not the map")
+        t.check(app.copy_table_button.isShowing(), "with its Copy table button")
+        t.check(app.results_switch.buttons["Researcher"].isSelected(), "and the switch shows Researcher")
+        data = view.table_data
+        summary = window["summary"][1]
+        t.equal([as_text(values[0]) for values in data["rows"]], [row.get("Parent_ROI_Name") for row in summary],
+                "one line per parent ROI, named as in the summary table")
+        keys = [column["key"] for column in data["columns"]]
+        for wanted in ["ROI_Area", "C1_DAPI_Object_Count", "C1_DAPI_Object_Density_Per_mm2",
+                       "C1_DAPI_Positive_Area_Fraction_Percent", "C1_DAPI_Mean", "C2_MAP2_Positive_Area_Fraction_Percent",
+                       "C2_MAP2_Mean", "C3_Channel_3_Mean"]:
+            t.check(wanted in keys, "the table has a column for " + wanted)
+        t.check("C1_DAPI_Edge_Touching_Object_Count" not in keys, "and none for the edge counts")
+        for column_index in range(1, len(keys)):
+            for row_index in range(len(summary)):
+                t.close(data["rows"][row_index][column_index], float(summary[row_index].get(keys[column_index])),
+                        keys[column_index] + " of region " + str(row_index + 1) + " is the value of roi_summary.csv")
+        count_column = keys.index("C1_DAPI_Object_Count")
+        counted = sum([int(row.get("C1_DAPI_Object_Count", "0")) for row in summary])
+        t.equal(data["sum"][count_column], float(counted), "the sum line adds up the object counts")
+        model = view.measure_table.getModel()
+        t.equal((model.getRowCount(), model.getColumnCount()), (len(keys) - 1, len(summary) + 2),
+                "the table shows one line per measurement, one column per region and one for the sum")
+        t.equal([as_text(view.measure_table.getColumnName(index)) for index in range(model.getColumnCount())],
+                ["Measurement"] + [row.get("Parent_ROI_Name") for row in summary] + ["Sum of regions"],
+                "the columns are the regions, then their sum")
+        t.equal(as_text(model.getValueAt(count_column - 1, 0)), "DAPI objects", "a line names its measurement")
+        t.equal([as_text(model.getValueAt(count_column - 1, index + 1)) for index in range(len(summary))],
+                [row.get("C1_DAPI_Object_Count") for row in summary], "and holds its value in every region")
+        t.equal(as_text(model.getValueAt(count_column - 1, len(summary) + 1)), str(counted), "and the sum of the regions")
+        widths = [view.measure_table.getColumnModel().getColumn(index).getWidth() for index in range(model.getColumnCount())]
+        metrics = view.measure_table.getFontMetrics(view.measure_table.getFont())
+        slack = []
+        for row_index in range(model.getRowCount()):
+            for index in range(model.getColumnCount()):
+                slack.append(widths[index] - metrics.stringWidth(as_text(model.getValueAt(row_index, index))))
+        t.check(min(slack) >= 12, "every column is wide enough for its values")
+        t.check(sum(widths) <= view.measure_scroll.getViewport().getWidth(),
+                "the whole table is in view without scrolling sideways (%d of %d pixels)" %
+                (sum(widths), view.measure_scroll.getViewport().getWidth()))
+        thresholds = view.threshold_table.getModel()
+        t.equal(thresholds.getRowCount(), len(window["thresholds"][1]), "one line per thresholded channel")
+        t.equal([as_text(thresholds.getValueAt(index, 0)) for index in range(thresholds.getRowCount())],
+                ["C" + row.get("Channel") + " " + row.get("Channel_Name") for row in window["thresholds"][1]],
+                "the threshold table names the channels of thresholds.csv")
+        copied = as_text(view.copy_text()).split("\n")
+        t.equal(len(copied), len(summary) + 3, "the copied table has the titles, every region and the sum line")
+        t.equal(copied[1].split("\t")[count_column], summary[0].get("C1_DAPI_Object_Count"), "with the counts of the summary table")
+        t.close(float(copied[1].split("\t")[1]), float(summary[0].get("ROI_Area")), "and the areas in full")
+        t.check(as_text(view.picture_note.getText()).startswith("All channels"), "the picture of the run has its caption")
+        picture = BufferedImage(max(1, view.getWidth()), max(1, view.getHeight()), BufferedImage.TYPE_INT_RGB)
+        pen = picture.createGraphics()
+        on_edt(lambda: view.paint(pen), "painting the Researcher view")
+        pen.dispose()
+        t.check(view.getWidth() > 600 and view.picture.getWidth() > 200, "the Researcher view is laid out, with room for the picture")
+        # The switch: Pitch shows the map and is remembered.
+        on_edt(lambda: app.results_switch.buttons["Pitch"].doClick(), "pressing Pitch")
+        settle(ctx)
+        t.equal(app.results_view, "Pitch", "pressing Pitch chooses the Pitch view")
+        t.check(canvas.isShowing() and not view.isShowing(), "which shows the map, not the tables")
+        t.check(not app.copy_table_button.isShowing(), "without the Copy table button")
+        t.equal(as_text(Prefs.get(key, "")), "Pitch", "the choice is remembered")
+        t.check(app.results_animation is not None, "the map comes in with its animation")
+        on_edt(lambda: app.set_results_view("Researcher", False), "a script choosing a view for one occasion")
+        settle(ctx)
+        t.check(view.isShowing(), "a script can show the other view")
+        t.equal(as_text(Prefs.get(key, "")), "Pitch", "without changing the remembered choice")
+        on_edt(lambda: app.set_results_view("something else"), "an unknown view")
+        t.equal(app.results_view, "Researcher", "an unknown view is the Researcher view")
+    finally:
+        Prefs.set(key, saved)
+
+
 def step_run_analysis(ctx, t):
     app = ctx.app
     E = ctx.E
@@ -907,6 +1109,7 @@ def step_run_analysis(ctx, t):
         pen.dispose()
     canvas.zoom = False
     t.check(True, "the map and the large picture both paint without an error")
+    check_results_views(ctx, t, app, window)
     t.check(app.source_preview.picture is not None, "the Session tab shows a small picture of the source image")
     t.equal(as_text(tabs.getTitleAt(0)), "Session", "the Session tab is still the first one")
     on_edt(lambda: tabs.setSelectedIndex(0), "back to the Session tab")
@@ -2512,6 +2715,7 @@ def step_look(ctx, t):
             "counts are added up, fractions are weighted by area, edge counts get no tile")
     t.equal(ns["results_from_summary"]([], [], [])["tiles"], [], "an empty table gives an empty Results tab")
     t.equal(ns["results_pictures"](os.path.join(ctx.out_dir, "no such run")), [], "a run without overlays shows no picture")
+    check_research_helpers(ns, t)
 
     before = UIManager.getLookAndFeel()
     state = ns["LOOK_STATE"]

@@ -41,6 +41,8 @@ from javax.swing import (
 from javax.swing import Timer as SwingTimer
 from javax.swing import JViewport, SwingConstants, Scrollable, JToggleButton, ButtonGroup, JSeparator, JTextPane
 from javax.swing import JPopupMenu, JMenuItem
+from javax.swing import JTable
+from javax.swing.table import DefaultTableModel, DefaultTableCellRenderer
 from javax.swing.text import JTextComponent, SimpleAttributeSet, StyleConstants
 from java.awt import LayoutManager, GraphicsEnvironment, CardLayout
 from java.awt.event import MouseAdapter, ComponentAdapter
@@ -59,8 +61,11 @@ from java.beans import PropertyChangeListener
 from javax.swing.event import DocumentListener, ChangeListener
 from java.awt.dnd import DropTarget, DnDConstants, DropTargetAdapter
 from java.awt.datatransfer import DataFlavor
+from java.awt.datatransfer import StringSelection
+from java.awt import Toolkit
 from java.io import File
 from java.lang import Runnable, System
+from java.lang import Object as JavaObject
 
 import os
 import math
@@ -688,6 +693,19 @@ PICTURE_BADGE = "Enlarge"
 RUN_LABEL = "Analyse"
 RESULTS_TAB_TITLE = "Results"
 RESULTS_PICTURE_SIZE = 900
+# The two views of the Results tab: the measurements as plain tables, or the
+# organoid map. The choice (Researcher | Pitch, on the tab) is remembered.
+RESULTS_VIEW_RESEARCH = "Researcher"
+RESULTS_VIEW_PITCH = "Pitch"
+RESULTS_VIEW_NAMES = [RESULTS_VIEW_RESEARCH, RESULTS_VIEW_PITCH]
+RESULTS_VIEW_PREF_KEY = "cellquant.results_view"
+RESEARCH_SUM_LABEL = "Sum of regions"
+RESEARCH_ROW_HIGH = 26
+RESEARCH_CELL_PAD = 10
+# Up to this many regions, the Researcher table has one column per region
+# (every value is in view); with more, one line per region.
+RESEARCH_ACROSS_LIMIT = 6
+RESEARCH_THRESHOLD_ROWS = 6
 CARD_ARC = 12.0
 # The height of a headline figure of the Results tab when the window is low.
 FIGURE_STEP_COMPACT = 72
@@ -1245,6 +1263,292 @@ def default_ring_metric(data):
         if found[index]["unit"] == "density":
             return index
     return 0
+
+
+def results_view_preference():
+    """The remembered view of the Results tab: Researcher or Pitch;
+    Researcher when nothing (or something unknown) was remembered."""
+    try:
+        view_value = to_text(Prefs.get(RESULTS_VIEW_PREF_KEY, RESULTS_VIEW_RESEARCH))
+    except ANY_ERROR:
+        return RESULTS_VIEW_RESEARCH
+    return view_value if view_value in RESULTS_VIEW_NAMES else RESULTS_VIEW_RESEARCH
+
+
+def format_fixed(value, decimals):
+    """1234567.891, 1 -> '1,234,567.9'."""
+    text = ("%." + str(int(decimals)) + "f") % value
+    sign = ""
+    if text.startswith("-"):
+        sign = "-"
+        text = text[1:]
+    whole = text
+    rest = ""
+    if "." in text:
+        whole = text[:text.index(".")]
+        rest = text[text.index("."):]
+    groups = []
+    while len(whole) > 3:
+        groups.insert(0, whole[-3:])
+        whole = whole[:-3]
+    groups.insert(0, whole)
+    return sign + ",".join(groups) + rest
+
+
+def format_research_value(value, kind):
+    """A value of the Researcher view as its table shows it. kind: "text",
+    "count", "density", "percent", "mean", "area" or "threshold". A missing
+    value is a dash; an empty text stays empty."""
+    if value is None:
+        return "-"
+    if kind == "text" or value == "":
+        return to_text(value)
+    if kind == "count":
+        return format_count(value)
+    if kind == "percent":
+        return format_fixed(value, 2)
+    if kind in ("density", "mean"):
+        return format_fixed(value, 1)
+    if kind == "threshold":
+        return format_count(value) if value == int(value) else "%.4g" % value
+    size = abs(value)
+    if size >= 100:
+        return format_fixed(value, 0)
+    if size >= 1:
+        return format_fixed(value, 2)
+    return "%.4g" % value
+
+
+def results_channel_prefixes(headers):
+    """The column prefixes of the channels of a summary table ("C3_DAPI"),
+    in the order of the table."""
+    known = set(headers)
+    found = []
+    for header in headers:
+        if not header.endswith("_Mean"):
+            continue
+        prefix = header[:-len("_Mean")]
+        if prefix + "_StdDev" in known and prefix + "_Raw_Integrated_Density" in known and prefix not in found:
+            found.append(prefix)
+    return found
+
+
+def results_channel_name(prefix, by_channel):
+    """'C3_DAPI' -> the name of channel 3 in the settings, else 'DAPI'."""
+    name = prefix
+    if prefix.startswith("C") and "_" in prefix:
+        name = prefix[prefix.index("_") + 1:].replace("_", " ")
+        try:
+            config = by_channel.get(int(prefix[1:prefix.index("_")]))
+        except ValueError:
+            config = None
+        if config is not None:
+            name = config["name"]
+    return name
+
+
+def results_sum_row(columns, rows, values):
+    """The last line of the Researcher table: counts and areas added up
+    over the regions, densities and positive-area shares worked out from
+    those sums. A value that cannot be worked out is None; mean intensities
+    are left empty (they cannot be added up)."""
+    areas = [result_number(row, "ROI_Area") for row in rows]
+    whole = sum(areas) if None not in areas else None
+    line = []
+    for column_index in range(len(columns)):
+        column = columns[column_index]
+        cells = [line_values[column_index] for line_values in values]
+        kind = column["kind"]
+        if kind == "text":
+            line.append(RESEARCH_SUM_LABEL)
+        elif kind == "area":
+            line.append(whole)
+        elif kind == "count":
+            line.append(sum(cells) if None not in cells else None)
+        elif kind == "density":
+            counts = [result_number(row, column["prefix"] + "_Object_Count") for row in rows]
+            total = None
+            if None not in counts and None not in cells and whole is not None and whole > 0:
+                if sum(counts) == 0:
+                    total = 0.0
+                for index in range(len(rows)):
+                    # Objects per square millimeter for one object per unit
+                    # of area, from any region that holds objects.
+                    if total is None and counts[index] > 0 and cells[index] > 0 and areas[index] > 0:
+                        total = cells[index] * areas[index] / counts[index] * sum(counts) / whole
+            line.append(total)
+        elif kind == "percent":
+            parts = [result_number(row, column["prefix"] + "_Positive_Area") for row in rows]
+            if None in parts or whole is None or whole <= 0:
+                line.append(None)
+            else:
+                line.append(sum(parts) / whole * 100.0)
+        else:
+            line.append("")
+    return line
+
+
+def results_table_from_summary(headers, rows, configs):
+    """What the Researcher view shows, worked out from the ROI summary
+    table: one line per region (summary row) and, per channel in the order
+    of the table, its object count and density per square millimeter (when
+    it detects objects), its positive-area share (when it measures one) and
+    its mean intensity.
+
+    Returns a dictionary:
+      "columns"  {"title" (short), "long" (in full), "kind" ("text",
+                 "area", "count", "density", "percent" or "mean"), "key"
+                 (the column of the summary table), "prefix" (of its
+                 channel)} for every column;
+      "rows"     per region, the value of every column as the table holds
+                 it (a float, None when missing; the name as text);
+      "sum"      the line of results_sum_row() when there are several
+                 regions in one frame, else None."""
+    by_channel = {}
+    for config in configs or []:
+        by_channel[config["channel"]] = config
+    known = set(headers)
+    units = set([to_text(row.get("ROI_Area_Unit", "")) for row in rows])
+    area_title = "Area"
+    if len(units) == 1 and list(units)[0] != "":
+        area_title = "Area (" + area_unit_words(list(units)[0]) + ")"
+    columns = [
+        {"title": "Region", "long": "Region", "kind": "text", "key": "Parent_ROI_Name", "prefix": ""},
+        {"title": area_title, "long": area_title, "kind": "area", "key": "ROI_Area", "prefix": ""}
+    ]
+    for prefix in results_channel_prefixes(headers):
+        name = results_channel_name(prefix, by_channel)
+        if prefix + "_Object_Count" in known:
+            columns.append({
+                "title": name + " objects", "long": name + " objects", "kind": "count",
+                "key": prefix + "_Object_Count", "prefix": prefix
+            })
+            if prefix + "_Object_Density_Per_mm2" in known:
+                columns.append({
+                    "title": name + " per mm" + SQUARED, "long": name + " objects per mm" + SQUARED, "kind": "density",
+                    "key": prefix + "_Object_Density_Per_mm2", "prefix": prefix
+                })
+        if prefix + "_Positive_Area_Fraction_Percent" in known:
+            columns.append({
+                "title": name + " area %", "long": name + " positive area (%)", "kind": "percent",
+                "key": prefix + "_Positive_Area_Fraction_Percent", "prefix": prefix
+            })
+        columns.append({
+            "title": name + " mean", "long": name + " mean intensity", "kind": "mean",
+            "key": prefix + "_Mean", "prefix": prefix
+        })
+    several_frames = len(set([to_text(other.get("Frame", "")) for other in rows])) > 1
+    values = []
+    for row in rows:
+        line = []
+        for column in columns:
+            if column["kind"] == "text":
+                label = to_text(row.get(column["key"], ""))
+                if several_frames:
+                    label = label + " (frame " + to_text(row.get("Frame", "")) + ")"
+                line.append(label)
+            else:
+                line.append(result_number(row, column["key"]))
+        values.append(line)
+    total = None
+    if len(rows) > 1 and not several_frames:
+        total = results_sum_row(columns, rows, values)
+    return {"columns": columns, "rows": values, "sum": total}
+
+
+def results_table_text(table):
+    """The Researcher table as text for the clipboard: one line per region,
+    values separated by tabs and written in full (as in roi_summary.csv),
+    so that it can be pasted into a spreadsheet."""
+    if table is None or len(table["rows"]) == 0:
+        return u""
+    lines = [u"\t".join([to_text(column["long"]) for column in table["columns"]])]
+    for line in table["rows"] + ([table["sum"]] if table["sum"] is not None else []):
+        cells = []
+        for column_index in range(len(table["columns"])):
+            value = line[column_index]
+            if value is None:
+                cells.append(u"")
+            elif table["columns"][column_index]["kind"] == "count":
+                cells.append(to_text(int(round(value))))
+            else:
+                cells.append(to_text(value))
+        lines.append(u"\t".join(cells))
+    return u"\n".join(lines) + u"\n"
+
+
+def results_table_layout(table):
+    """The table of the Researcher view as texts. With up to
+    RESEARCH_ACROSS_LIMIT regions it has one line per measurement and one
+    column per region (and one for the sum), so that every value is in
+    view; with more regions, one line per region, as in roi_summary.csv.
+
+    Returns {"across" (regions as columns), "titles", "lines", "right"
+    (per column: numbers, set to the right), "tips" (per line and column:
+    the value in full with its column of the summary table), "bold_row",
+    "bold_column" (where the sums are, or None)}."""
+    columns = table["columns"]
+    records = table["rows"] + ([table["sum"]] if table["sum"] is not None else [])
+    texts = []
+    tips = []
+    for record in records:
+        summed = record is table["sum"]
+        texts.append([format_research_value(record[index], columns[index]["kind"]) for index in range(len(columns))])
+        record_tips = []
+        for index in range(len(columns)):
+            if columns[index]["kind"] == "text" or record[index] == "":
+                record_tips.append(None)
+            elif summed:
+                record_tips.append(None if record[index] is None else
+                                   to_text(columns[index]["long"]) + ", regions added up = " + to_text(record[index]))
+            else:
+                record_tips.append(columns[index]["key"] + " = " +
+                                   ("no value" if record[index] is None else to_text(record[index])))
+        tips.append(record_tips)
+    summed_at = len(records) - 1 if table["sum"] is not None else None
+    if len(table["rows"]) > RESEARCH_ACROSS_LIMIT:
+        return {
+            "across": False, "titles": [column["title"] for column in columns], "lines": texts,
+            "right": [column["kind"] != "text" for column in columns], "tips": tips,
+            "bold_row": summed_at, "bold_column": None
+        }
+    lines = []
+    line_tips = []
+    for index in range(1, len(columns)):
+        lines.append([columns[index]["long"]] + [texts[record_index][index] for record_index in range(len(records))])
+        line_tips.append([None] + [tips[record_index][index] for record_index in range(len(records))])
+    return {
+        "across": True, "titles": ["Measurement"] + [texts[record_index][0] for record_index in range(len(records))],
+        "lines": lines, "right": [False] + [True] * len(records), "tips": line_tips,
+        "bold_row": None, "bold_column": None if summed_at is None else summed_at + 1
+    }
+
+
+def results_thresholds_from_rows(rows):
+    """The thresholds of a run for the Researcher view, from its threshold
+    table: per channel what it measures, how it was thresholded, and the
+    limits used (None for a local threshold, which has no single value).
+    Returns {"columns": titles, "rows": [[channel, measures, how, low, high]]}."""
+    several_frames = len(set([to_text(other.get("Frame", "")) for other in rows])) > 1
+    lines = []
+    for row in rows:
+        channel = ("C" + to_text(row.get("Channel", "")) + " " + to_text(row.get("Channel_Name", ""))).strip()
+        if several_frames:
+            channel = channel + " (frame " + to_text(row.get("Frame", "")) + ")"
+        mode = to_text(row.get("Threshold_Mode", ""))
+        how = mode
+        if mode == "Auto":
+            how = "Auto, " + to_text(row.get("Automatic_Method", ""))
+            factor = result_number(row, "Automatic_Multiplier")
+            if factor is not None and abs(factor - 1.0) > 1e-9:
+                how = how + " x " + ("%g" % factor)
+        elif mode == "Local Phansalkar":
+            how = mode + ", radius " + to_text(row.get("Local_Radius", ""))
+        lines.append([
+            channel, to_text(row.get("Analysis_Mode", "")), how,
+            result_number(row, "Threshold_Low"), result_number(row, "Threshold_High")
+        ])
+    return {"columns": ["Channel", "Measures", "Threshold", "Low", "High"], "rows": lines}
 
 
 def results_pictures(run_dir, configs=None):
@@ -3430,6 +3734,265 @@ class SegmentListener(ActionListener):
         self.switch.chosen(self.name)
 
 
+class ResearchTableModel(DefaultTableModel):
+    """The lines of a table of the Researcher view; nothing can be edited."""
+
+    def isCellEditable(self, row, column):
+        return False
+
+
+class ResearchCell(DefaultTableCellRenderer):
+    """A cell of a table of the Researcher view: numbers to the right, the
+    sum line in semibold, and as its tooltip the value in full with the
+    column of the result table it comes from."""
+
+    def __init__(self, facts):
+        DefaultTableCellRenderer.__init__(self)
+        # {"right": per column, "tips": per line and column, "bold": line or
+        # None, "bold_column": column or None}
+        self.facts = facts
+
+    def getTableCellRendererComponent(self, table, value, selected, focused, row, column):
+        cell = self.super__getTableCellRendererComponent(table, value, selected, False, row, column)
+        index = table.convertColumnIndexToModel(column)
+        right = index < len(self.facts["right"]) and self.facts["right"][index]
+        cell.setHorizontalAlignment(SwingConstants.RIGHT if right else SwingConstants.LEFT)
+        strong = self.facts.get("bold") == row or self.facts.get("bold_column") == index
+        cell.setFont(look_font("ui_semibold" if strong else "ui", 13))
+        cell.setBorder(BorderFactory.createEmptyBorder(0, RESEARCH_CELL_PAD, 0, RESEARCH_CELL_PAD))
+        tips = self.facts.get("tips") or []
+        cell.setToolTipText(tips[row][index] if row < len(tips) and index < len(tips[row]) else None)
+        return cell
+
+
+class ResearchHeaderCell(DefaultTableCellRenderer):
+    """The title of a column: quiet, on the card, over a hairline, and to
+    the right over a column of numbers. It takes its colors from the look
+    in use at painting time."""
+
+    def __init__(self, facts):
+        DefaultTableCellRenderer.__init__(self)
+        self.facts = facts
+
+    def getTableCellRendererComponent(self, table, value, selected, focused, row, column):
+        self.setText(to_text(value if value is not None else ""))
+        index = table.convertColumnIndexToModel(column)
+        right = index < len(self.facts["right"]) and self.facts["right"][index]
+        self.setHorizontalAlignment(SwingConstants.RIGHT if right else SwingConstants.LEFT)
+        self.setFont(look_font("ui_semibold", 12))
+        self.setOpaque(True)
+        self.setBackground(pal("card"))
+        self.setForeground(pal("faint"))
+        self.setBorder(BorderFactory.createCompoundBorder(
+            BorderFactory.createMatteBorder(0, 0, 1, 0, pal("line")),
+            BorderFactory.createEmptyBorder(7, RESEARCH_CELL_PAD, 7, RESEARCH_CELL_PAD)
+        ))
+        return self
+
+
+def research_table():
+    """An empty table of the Researcher view in its scrolling area, as
+    (table, scroll, facts). research_fill() gives it its lines."""
+    facts = {"right": [], "tips": [], "bold": None, "bold_column": None}
+    table = JTable(ResearchTableModel())
+    table.setAutoResizeMode(JTable.AUTO_RESIZE_OFF)
+    table.setRowHeight(RESEARCH_ROW_HIGH)
+    table.setShowGrid(False)
+    table.setShowHorizontalLines(True)
+    table.setIntercellSpacing(Dimension(0, 1))
+    table.setFillsViewportHeight(True)
+    table.setFont(look_font("ui", 13))
+    table.setDefaultRenderer(JavaObject, ResearchCell(facts))
+    header = table.getTableHeader()
+    header.setReorderingAllowed(False)
+    header.setFont(look_font("ui_semibold", 12))
+    header.setDefaultRenderer(ResearchHeaderCell(facts))
+    table.setPreferredScrollableViewportSize(Dimension(200, 3 * RESEARCH_ROW_HIGH))
+    scroll = JScrollPane(table)
+    scroll.setBorder(BorderFactory.createEmptyBorder())
+    for bar in [scroll.getHorizontalScrollBar(), scroll.getVerticalScrollBar()]:
+        # The track of a scroll bar is the card it lies on.
+        bar.setOpaque(False)
+        set_style(bar, "track: $CellQuant.card")
+    research_recolor(table, scroll)
+    return (table, scroll, facts)
+
+
+def research_recolor(table, scroll):
+    """Give a table of the Researcher view the colors of the look in use:
+    it lies on a card."""
+    table.setBackground(pal("card"))
+    table.setForeground(pal("text"))
+    table.setGridColor(pal("line"))
+    header = table.getTableHeader()
+    header.setBackground(pal("card"))
+    header.setForeground(pal("faint"))
+    scroll.getViewport().setBackground(pal("card"))
+
+
+def research_fill(table, facts, titles, lines, right, tips, bold=None, first_wide=120, bold_column=None):
+    """Show lines (texts) under titles in a table of the Researcher view,
+    every column as wide as its widest text."""
+    facts["right"] = list(right)
+    facts["tips"] = tips
+    facts["bold"] = bold
+    facts["bold_column"] = bold_column
+    model = ResearchTableModel()
+    for title in titles:
+        model.addColumn(to_text(title))
+    for line in lines:
+        model.addRow([to_text(text) for text in line])
+    table.setModel(model)
+    plain = table.getFontMetrics(look_font("ui", 13))
+    strong = table.getFontMetrics(look_font("ui_semibold", 13))
+    heading = table.getTableHeader().getFontMetrics(look_font("ui_semibold", 12))
+    for index in range(len(titles)):
+        wide = heading.stringWidth(to_text(titles[index]))
+        for line_index in range(len(lines)):
+            measure = strong if (bold == line_index or bold_column == index) else plain
+            wide = max(wide, measure.stringWidth(to_text(lines[line_index][index])))
+        wide += 2 * RESEARCH_CELL_PAD + 6
+        if index == 0:
+            wide = max(wide, first_wide)
+        column = table.getColumnModel().getColumn(index)
+        column.setMinWidth(40)
+        column.setPreferredWidth(int(wide))
+        column.setWidth(int(wide))
+
+
+class ResearchPicture(JPanel):
+    """The picture of the run, whole: all channels merged with the detected
+    objects outlined, the regions outlined and named, and a scale bar. It
+    shows the picture the organoid map holds."""
+
+    def __init__(self, canvas):
+        JPanel.__init__(self)
+        self.canvas = canvas
+        self.setOpaque(False)
+        self.setMinimumSize(Dimension(120, 120))
+        self.setPreferredSize(Dimension(360, 360))
+
+    def paintComponent(self, graphics):
+        pen = graphics.create()
+        try:
+            look_smooth(pen)
+            width = self.getWidth()
+            height = self.getHeight()
+            pictures = self.canvas.pictures
+            if len(pictures) == 0:
+                pen.setFont(look_font("ui", 13))
+                pen.setColor(pal("faint"))
+                paint_wrapped(pen, "The picture of a run is shown here: all channels merged, with the detected objects outlined.",
+                              0, 18, max(40, width), 19)
+                return
+            picture = pictures[0]
+            image = picture[1]
+            parents = picture[2] if len(picture) > 2 else []
+            if width < 40 or height < 40:
+                return
+            scale = min(width / float(image.getWidth()), height / float(image.getHeight()))
+            shown_width = int(image.getWidth() * scale)
+            shown_height = int(image.getHeight() * scale)
+            left = (width - shown_width) // 2
+            top = 0
+            pen.clip(RoundRectangle2D.Float(left, top, shown_width, shown_height, CARD_ARC, CARD_ARC))
+            pen.drawImage(image, left, top, shown_width, shown_height, None)
+            self.canvas.paint_outlines(pen, parents, left, top, scale, True)
+            if len(picture) > 3 and picture[3] is not None:
+                self.canvas.paint_scale_bar(pen, picture[3], scale, left, top + shown_height, shown_width)
+        finally:
+            pen.dispose()
+
+
+class ResearchView(JPanel):
+    """The Results tab for a researcher, without the map: the measurements
+    of every region as a plain table, the thresholds the run used, and the
+    picture of the run to check the segmentation by eye. Like the map it
+    only displays: it reads the summary and threshold tables of the
+    finished run."""
+
+    EMPTY = "No results yet. Open an image on the Session tab, then press Analyse."
+    HOW = "Point at a value to see it in full."
+    SUM = RESEARCH_SUM_LABEL + " adds up counts and areas; regions that overlap are counted more than once. "
+
+    def __init__(self, canvas):
+        JPanel.__init__(self, BorderLayout(0, 0))
+        self.setBorder(BorderFactory.createEmptyBorder(8, 12, 12, 12))
+        self.canvas = canvas
+        self.table_data = None
+        self.threshold_data = None
+        self.measure_table, self.measure_scroll, self.measure_facts = research_table()
+        self.threshold_table, self.threshold_scroll, self.threshold_facts = research_table()
+        self.measure_note = WrapNote(self.EMPTY, 12)
+        self.threshold_table.setToolTipText("How each channel was segmented in this run; thresholds.csv holds every setting.")
+        self.picture = ResearchPicture(canvas)
+        self.picture_note = WrapNote("", 12)
+
+        measure_card = Card("Measurements by region", grow=True)
+        grid_add(measure_card, self.measure_scroll, 0, form_next_row(measure_card), width=3, weightx=1.0, weighty=1.0,
+                 fill=GridBagConstraints.BOTH)
+        form_wide(measure_card, self.measure_note, 10, 0)
+        threshold_card = Card("Thresholds used")
+        form_wide(threshold_card, self.threshold_scroll, 0, 0)
+        left = JPanel(BorderLayout(0, GAP))
+        left.add(measure_card, BorderLayout.CENTER)
+        left.add(threshold_card, BorderLayout.SOUTH)
+        picture_card = Card("Segmentation check", grow=True)
+        grid_add(picture_card, self.picture, 0, form_next_row(picture_card), width=3, weightx=1.0, weighty=1.0,
+                 fill=GridBagConstraints.BOTH)
+        form_wide(picture_card, self.picture_note, 10, 0)
+        columns = JPanel(ShareLayout(0.6, GAP))
+        columns.add(left)
+        columns.add(picture_card)
+        self.add(columns, BorderLayout.CENTER)
+
+    def recolor(self):
+        """After a change of look: the tables take the colors of the new one."""
+        research_recolor(self.measure_table, self.measure_scroll)
+        research_recolor(self.threshold_table, self.threshold_scroll)
+        self.repaint()
+
+    def fill(self, headers, rows, threshold_rows, configs):
+        """Show a finished run: its summary table and its threshold table."""
+        data = results_table_from_summary(headers, rows, configs)
+        self.table_data = data
+        shape = results_table_layout(data)
+        research_fill(
+            self.measure_table, self.measure_facts, shape["titles"], shape["lines"], shape["right"], shape["tips"],
+            shape["bold_row"], 190 if shape["across"] else 150, shape["bold_column"]
+        )
+        self.measure_note.setText(
+            (self.SUM if data["sum"] is not None else "") + self.HOW if len(data["rows"]) > 0 else self.EMPTY
+        )
+
+        found = results_thresholds_from_rows(threshold_rows or [])
+        self.threshold_data = found
+        shown = []
+        for values in found["rows"]:
+            local = to_text(values[2]).startswith("Local")
+            shown.append([
+                values[0], values[1], values[2],
+                "per pixel" if local and values[3] is None else format_research_value(values[3], "threshold"),
+                "" if local and values[4] is None else format_research_value(values[4], "threshold")
+            ])
+        research_fill(self.threshold_table, self.threshold_facts, found["columns"], shown,
+                      [False, False, False, True, True], [], None, 110)
+        high = max(1, min(RESEARCH_THRESHOLD_ROWS, len(shown))) * RESEARCH_ROW_HIGH
+        self.threshold_table.setPreferredScrollableViewportSize(Dimension(200, high))
+        self.show_picture()
+        self.revalidate()
+        self.repaint()
+
+    def show_picture(self):
+        """The picture the map holds now, with its caption."""
+        pictures = self.canvas.pictures
+        self.picture_note.setText(to_text(pictures[0][0]) if len(pictures) > 0 else "")
+        self.picture.repaint()
+
+    def copy_text(self):
+        return results_table_text(self.table_data)
+
+
 def tidy_tab(container, inside=False):
     """Make everything on a card transparent, so that the card shows
     through: panels, check boxes, scrolling areas and texts. Text fields,
@@ -3612,6 +4175,7 @@ class CellQuantStudioUniversal(JFrame):
         # Every kept style (filled buttons, links, segments) takes the
         # colors of the new look.
         restyle_tree(self.getContentPane())
+        self.research_view.recolor()
         self.getContentPane().revalidate()
         self.repaint()
 
@@ -3630,26 +4194,102 @@ class CellQuantStudioUniversal(JFrame):
                 self.style_buttons(child)
 
     def build_results_tab(self):
-        """The latest analysis as a picture: headline numbers, the organoid
-        map of the parent ROIs, and the picture of the run. The tables and
-        files of the run are unchanged; this only shows them."""
+        """The latest analysis, in one of two views. Researcher: the
+        measurements of every region as a plain table, the thresholds used
+        and the picture of the run. Pitch: the organoid map, with headline
+        numbers and one ring per parent ROI. The tables and files of the run
+        are unchanged; both views only show them."""
         panel = JPanel(BorderLayout(0, 0))
         self.results_canvas = ResultsCanvas()
         self.results_canvas.on_run = self.run_analysis_action
+        self.research_view = ResearchView(self.results_canvas)
         self.results_caption = JLabel("The latest analysis is shown here.")
         self.results_caption.setFont(look_font("ui_semibold", 13))
+        # A long image name is shortened with "..." here; its tooltip and the tables hold all of it.
+        self.results_caption.putClientProperty("cellquant.elides", "yes")
+        self.results_caption.setMinimumSize(Dimension(60, 10))
         self.results_folder_note = WrapNote("", 12, True, True)
         self.results_folder_note.setVisible(False)
         words = JPanel(BorderLayout(0, 2))
         words.add(self.results_caption, BorderLayout.NORTH)
         words.add(self.results_folder_note, BorderLayout.CENTER)
+        self.results_switch = Segmented(RESULTS_VIEW_NAMES, results_view_preference(), self.set_results_view)
+        self.results_switch.buttons[RESULTS_VIEW_RESEARCH].setToolTipText(
+            "The measurements as plain tables, the thresholds used and the picture of the run. The choice is remembered."
+        )
+        self.results_switch.buttons[RESULTS_VIEW_PITCH].setToolTipText(
+            "The organoid map: headline numbers and one ring per region, for showing the tool. The choice is remembered."
+        )
+        self.copy_table_button = JButton("Copy table", actionPerformed=self.copy_results_table)
+        self.copy_table_button.setToolTipText(
+            "Copy the measurements of every region, written in full, to paste into a spreadsheet."
+        )
+        switch_place = JPanel(GridBagLayout())
+        switch_place.add(self.results_switch)
+        side = button_row(
+            [switch_place, self.copy_table_button, JButton("Show result files", actionPerformed=self.open_last_output_folder)], 12
+        )
         bar = JPanel(BorderLayout(16, 0))
         bar.setBorder(BorderFactory.createEmptyBorder(14, 28, 4, 24))
         bar.add(words, BorderLayout.CENTER)
-        bar.add(button_row([JButton("Show result files", actionPerformed=self.open_last_output_folder)]), BorderLayout.EAST)
+        bar.add(side, BorderLayout.EAST)
+        self.results_cards = CardLayout()
+        self.results_body = JPanel(self.results_cards)
+        self.results_body.add(self.research_view, RESULTS_VIEW_RESEARCH)
+        self.results_body.add(self.results_canvas, RESULTS_VIEW_PITCH)
         panel.add(bar, BorderLayout.NORTH)
-        panel.add(self.results_canvas, BorderLayout.CENTER)
+        panel.add(self.results_body, BorderLayout.CENTER)
+        self.show_results_view(results_view_preference())
         return panel
+
+    def show_results_view(self, name):
+        """Event thread: bring one view of the Results tab to the front."""
+        self.results_view = name
+        self.results_switch.choose(name)
+        self.results_cards.show(self.results_body, name)
+        self.copy_table_button.setVisible(name == RESULTS_VIEW_RESEARCH)
+
+    @ui_action
+    def set_results_view(self, name, remember=True):
+        """Show the Results tab as plain tables (Researcher) or as the
+        organoid map (Pitch). The choice is remembered unless remember is
+        false (for a demo, which must not change what the user chose)."""
+        name = to_text(name)
+        if name not in RESULTS_VIEW_NAMES:
+            name = RESULTS_VIEW_RESEARCH
+        if remember:
+            try:
+                Prefs.set(RESULTS_VIEW_PREF_KEY, name)
+            except ANY_ERROR:
+                pass
+        changed = name != getattr(self, "results_view", None)
+        self.show_results_view(name)
+        if changed and name == RESULTS_VIEW_PITCH and self.results_canvas.data is not None:
+            # The map comes in the way it does after an analysis.
+            self.start_results_animation()
+
+    def start_results_animation(self):
+        if self.results_animation is not None:
+            self.results_animation.timer.stop()
+        self.results_canvas.progress = 0.0
+        self.results_animation = ResultsAnimation(self.results_canvas)
+        self.results_animation.timer.start()
+
+    @ui_action
+    def copy_results_table(self, event=None):
+        """Put the table of the Researcher view on the clipboard."""
+        text = self.research_view.copy_text()
+        if text == "":
+            self.append_status("There is no results table to copy yet: run an analysis first.")
+            return
+        try:
+            Toolkit.getDefaultToolkit().getSystemClipboard().setContents(StringSelection(text), None)
+            lines = len(self.research_view.table_data["rows"])
+            self.append_status(
+                "Copied the measurements of " + str(lines) + (" region" if lines == 1 else " regions") + " to the clipboard."
+            )
+        except ANY_ERROR as exc:
+            self.append_status("The table could not be copied: " + to_text(exc))
 
     def show_results(self, result, configs, run_dir, source_title="", pictures=None):
         """Event thread: fill the Results tab from a finished analysis and
@@ -3671,16 +4311,19 @@ class CellQuantStudioUniversal(JFrame):
                 to_text(source_title) + dot + str(regions) + (" region" if regions == 1 else " regions") +
                 dot + time.strftime("%d %b %Y, %H:%M")
             )
+            self.results_caption.setToolTipText(to_text(source_title))
             self.results_folder_note.setText("Saved in " + to_text(run_dir))
             self.results_folder_note.setVisible(True)
-            if self.results_animation is not None:
-                self.results_animation.timer.stop()
-            self.results_canvas.progress = 0.0
-            self.results_animation = ResultsAnimation(self.results_canvas)
-            self.results_animation.timer.start()
+            self.start_results_animation()
             self.main_tabs.setSelectedIndex(self.main_tabs.indexOfTab(RESULTS_TAB_TITLE))
         except ANY_ERROR as exc:
             self.append_status("The Results tab could not be filled: " + to_text(exc))
+        try:
+            self.research_view.fill(
+                result["summary_headers"], result["summary_rows"], result.get("threshold_rows", []), configs
+            )
+        except ANY_ERROR as exc:
+            self.append_status("The tables of the Results tab could not be filled: " + to_text(exc))
 
     def build_log_drawer(self):
         """The run log: every status message with its time, under the tabs.

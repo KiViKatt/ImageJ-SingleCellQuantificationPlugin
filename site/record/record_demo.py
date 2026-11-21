@@ -275,6 +275,12 @@ def main():
         results_index = ui(lambda: frame.main_tabs.indexOfTab("Results"))
 
         def to_results():
+            # The pictures of the page show the organoid map (the Pitch view).
+            if hasattr(frame, "set_results_view"):
+                frame.set_results_view("Pitch", False)
+                if getattr(frame, "results_animation", None) is not None:
+                    frame.results_animation.timer.stop()
+                canvas.progress = 1.0
             frame.main_tabs.setSelectedIndex(results_index)
             canvas.zoom = False
             canvas.point_at(-1000, -1000)

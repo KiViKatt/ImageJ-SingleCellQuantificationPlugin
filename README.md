@@ -19,7 +19,7 @@ Built-in tools check the results: object counts against manual point marks, mask
 
 ![The Results tab after an analysis: totals on the left, one ring per region in the middle, the regions on the right](docs/images/results_tab.jpg)
 
-*The Results tab after an analysis of a synthetic test image (not real tissue), in the Light appearance.*
+*The Results tab after an analysis of a synthetic test image (not real tissue), in its Pitch view and the Light appearance.*
 
 ## The window
 
@@ -31,13 +31,24 @@ Built-in tools check the results: object counts against manual point marks, mask
 
 ![The Session tab with an image loaded: the source image, its channels with their wavelengths, the setup and the three steps](docs/images/session_tab.jpg)
 
-- **Results tab: the organoid map.** After **3 Analyse** the window shows the run as one picture.
+- **Results tab, in two views.** After **3 Analyse** the window shows the run. **Researcher | Pitch** at the top right of the tab chooses how; the choice is remembered, and a new installation starts in Researcher. Both views only display: every number comes from `roi_summary.csv` and `thresholds.csv`, which remain the record.
+- **Researcher view: plain tables.**
+  - **Measurements by region.** The ROI area and, for every channel, what it measures: object count and objects per mm² (when it detects objects), positive area in percent (when it measures one) and mean intensity. With up to six regions there is one column per region and one line per measurement, so every value is in view; with more regions, one line per region, as in `roi_summary.csv`.
+  - **Sum of regions** adds up the counts and areas of the regions and works the density and the positive-area share out from those sums. Regions that overlap (a section and a zone inside it) are counted more than once; mean intensities are not summed.
+  - Pointing at a value shows it in full with the name of its column in `roi_summary.csv`. **Copy table** puts the table on the clipboard, one line per region, tab-separated and with the values in full, ready to paste into a spreadsheet.
+  - **Thresholds used.** For every channel: what it measures, how it was thresholded (method, multiplier, local radius) and the limits used.
+  - **Segmentation check.** The picture of the run, whole: all channels merged in their own colors, every detected object outlined, the regions outlined and named, and a scale bar.
+
+![The Researcher view of the Results tab: the measurements of every region, the thresholds used and the picture of the run](docs/images/results_research.jpg)
+
+- **Pitch view: the organoid map.** The run as one picture, for showing the tool.
   - **In the middle**, wide rings, one per parent ROI (the first eight), from the outside in. The arc of a ring is that region's value as a share of the highest one (for a positive-area share: of 100%); the line under the rings says which. At their center, in a small round window, is the picture of the run: all channels merged in their own colors, every detected object outlined. A click on it shows the whole picture, uncropped, with the parent ROIs named and a scale bar; **Back to the map** returns.
   - **On the left**, the headline figures (counts added up over the parent ROIs; positive-area shares as positive area of all ROIs over their area), the list **Rings show** that chooses the value of the rings (object count, object density per mm², or positive-area share, for every channel that has it; when there are many, the rest are under **More choices**), and the **Analyse** button, which runs the analysis like **3 Analyse**.
   - **On the right**, the regions: the chosen value in large figures, the other values and the ROI area under the name; below them, what can be pointed at and clicked.
-  - **At the top**, the image name, the number of regions, the time of the run and its folder, and **Show result files**.
+  - **At the top** (in both views), the image name, the number of regions, the time of the run and its folder, the **Researcher | Pitch** switch and **Show result files**.
   - Pointing at a ring or at a region lights it up and outlines that region on the picture.
   - Nothing new is measured or written: every number comes from `roi_summary.csv`, which remains the record.
+  - The one-click demo and the pictures of the landing page use this view, without changing the view you chose.
   - The headline count adds up the parent ROIs. When parent ROIs share a border (for example depth zones that touch), an object lying on the border is clipped there and counted in both.
 
 ![One region pointed at: its ring, its row and its outline on the picture](docs/images/results_hover.jpg)

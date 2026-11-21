@@ -7,7 +7,7 @@
 3. finds the tissue outline;
 4. adds three depth zones that do not overlap: 0-100 µm, 100-200 µm, and over 200 µm, measured from the tissue edge, not from the edge of the picture;
 5. runs the analysis;
-6. ends on the Results tab.
+6. ends on the Results tab, in its **Pitch** view (the rings). Your own choice of view (Researcher or Pitch) is left as it was.
 
 It changes nothing in how images are measured. It only clicks through the window the way a user would.
 
@@ -42,4 +42,4 @@ Results go to `C:\CQ_demo` (on macOS and Linux, `~/CQ_demo`).
 | 2:00 | Light / Dark switch | "Light or dark, the same tool." |
 | 2:15 | "Show result files" | "Plain tables any lab can open, plus the exact settings. Open source, built in Fiji, by scientists for scientists." |
 
-**If something goes wrong:** the Results tab keeps the last finished analysis. Click the Results tab and present from there.
+**If something goes wrong:** the Results tab keeps the last finished analysis. Click the Results tab and present from there; if it shows tables instead of the rings, press **Pitch** at the top right of the tab.

@@ -285,10 +285,20 @@ def snap_real(frame, namespace, image, profile, output):
     return imp
 
 
+def snap_results_view(frame, name):
+    """Show the Results tab in one of its views (Researcher or Pitch),
+    without changing the remembered choice."""
+    chooser = getattr(frame, "set_results_view", None)
+    if chooser is not None:
+        chooser(name, False)
+
+
 def snap_extras(frame, demo):
     """More states worth a picture: (name, set up, put back). The run log
     open on the Session tab; with the demo, a ring pointed at and the
-    picture of the run enlarged on the Results tab."""
+    picture of the run enlarged on the Results tab. The tabs themselves are
+    pictured with the Results tab in its Researcher view; the Pitch view
+    (the organoid map) is pictured here."""
     extras = []
     if getattr(frame, "toggle_run_log", None) is not None:
         def log_open():
@@ -297,24 +307,39 @@ def snap_extras(frame, demo):
         extras.append(("09_session_run_log", log_open, lambda: frame.toggle_run_log()))
     canvas = getattr(frame, "results_canvas", None)
     if demo and canvas is not None and len(canvas.pictures) > 0:
-        def point():
+        def pitch():
+            # The organoid map, with its numbers at their final values.
             frame.main_tabs.setSelectedIndex(frame.main_tabs.indexOfTab("Results"))
+            snap_results_view(frame, "Pitch")
+            if getattr(frame, "results_animation", None) is not None:
+                frame.results_animation.timer.stop()
+            canvas.progress = 1.0
+            canvas.zoom = False
             frame.validate()
+
+        def research():
+            snap_results_view(frame, "Researcher")
+
+        def point():
+            pitch()
             shape = canvas.geometry()
             if len(shape["rings"]) > 1:
                 canvas.point_at(shape["x"] + shape["rings"][1][0], shape["y"])
 
         def unpoint():
             canvas.point_at(-1000, -1000)
+            research()
 
         def zoom():
-            frame.main_tabs.setSelectedIndex(frame.main_tabs.indexOfTab("Results"))
+            pitch()
             canvas.zoom = True
             canvas.repaint()
 
         def unzoom():
             canvas.zoom = False
             canvas.repaint()
+            research()
+        extras.append(("13_results_pitch", pitch, research))
         extras.append(("10_results_hover", point, unpoint))
         extras.append(("11_results_picture", zoom, unzoom))
     panels = getattr(frame, "channel_panels", [])
@@ -376,6 +401,7 @@ def snap_main():
     snap_on_ui(lambda: frame.setSize(width, height))
     written = []
     work = tempfile.mkdtemp(prefix="cellquant_snap_")
+    snap_on_ui(lambda: snap_results_view(frame, "Researcher"))
     try:
         if image:
             snap_real(frame, namespace, image, profile, work)
