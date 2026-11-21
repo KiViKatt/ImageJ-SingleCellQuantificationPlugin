@@ -176,6 +176,10 @@ def demo_main():
 
     look = demo_settings_file().get("look", "Dark")
     demo_set_look(frame, look)
+    # The demo shows the organoid map (the Pitch view of the Results tab)
+    # from the moment the analysis ends, without changing the view the
+    # user chose for their own work.
+    demo_pitch_view(frame)
     demo_ui(lambda: frame.main_tabs.setSelectedIndex(0))
     say("opening the image")
     demo_ui(lambda: frame.open_image_path(image, True))
@@ -230,6 +234,7 @@ def demo_main():
             if frame.main_tabs.getTitleAt(index) == "Results":
                 frame.main_tabs.setSelectedIndex(index)
     demo_set_look(frame, look)
+    demo_pitch_view(frame)
     demo_ui(to_results)
     say("done")
     try:
@@ -270,6 +275,17 @@ def demo_dialog_text(container):
         if hasattr(child, "getComponents"):
             words.append(demo_dialog_text(child))
     return " ".join(words)
+
+
+def demo_pitch_view(frame):
+    """Show the Results tab as the organoid map for this demo. The view the
+    user chose (Researcher or Pitch) stays the remembered one."""
+    if not hasattr(frame, "set_results_view"):
+        return
+    try:
+        demo_ui(lambda: frame.set_results_view("Pitch", False))
+    except DEMO_ERRORS as exc:
+        IJ.log("Cell Quant Studio demo: could not show the Pitch view (" + str(exc) + ")")
 
 
 def demo_set_look(frame, look):
