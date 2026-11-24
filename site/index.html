@@ -10,7 +10,9 @@
 <meta name="description" content="Cell Quant Studio is a free, open-source Fiji/ImageJ application that counts cells and measures markers in multichannel fluorescence images, with built-in validation.">
 <meta property="og:title" content="Cell Quant Studio">
 <meta property="og:description" content="Count cells and measure markers in fluorescence microscopy images, the same way every time. Free and open source, for Fiji/ImageJ.">
-<meta property="og:image" content="img/demo-3.jpg">
+<meta property="og:url" content="https://quantmycells.com/">
+<meta property="og:image" content="https://quantmycells.com/img/demo-3.jpg">
+<link rel="canonical" href="https://quantmycells.com/">
 <meta name="theme-color" id="themeColor" content="#000000">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23000000'/%3E%3Ccircle cx='32' cy='32' r='22' fill='none' stroke='%23F5F5F7' stroke-width='6' stroke-dasharray='110 200' stroke-linecap='round' transform='rotate(-90 32 32)'/%3E%3Ccircle cx='32' cy='32' r='12' fill='none' stroke='%23AEAEB2' stroke-width='5' stroke-dasharray='48 100' stroke-linecap='round' transform='rotate(-90 32 32)'/%3E%3Ccircle cx='32' cy='32' r='4' fill='%230A84FF'/%3E%3C/svg%3E">
 <script>
@@ -36,6 +38,8 @@
   --display: "Chakra Petch", "Avenir Next", "Segoe UI", sans-serif;
   --body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
   --space: clamp(52px, 6.5vw, 84px);
+  /* first screen: the height of one button, the gap between the two, and of both together */
+  --button: clamp(56px, 3.7vw, 72px); --pair-gap: 12px; --pair: calc(2 * var(--button) + var(--pair-gap));
 
   /* Dark: the Dark look of the app. Black and Apple's dark grays, near-white
      text, one blue for actions. The rings are neutral, from near-white inward
@@ -118,6 +122,7 @@ h3 { font-weight: 600; font-size: 19px; line-height: 1.3; }
 .bar nav { display: flex; align-items: center; gap: 28px; font-size: 15px; }
 .bar nav a:not(.btn) { color: var(--soft); }
 .bar nav a:not(.btn):hover { color: var(--text); text-decoration: none; }
+@media (max-width: 1000px) { .bar nav a.roomy { display: none; } }
 @media (max-width: 760px) { .bar nav { gap: 12px; } .bar nav a:not(.btn) { display: none; } }
 @media (max-width: 400px) { .bar nav .btn { display: none; } }
 
@@ -129,6 +134,42 @@ h3 { font-weight: 600; font-size: 19px; line-height: 1.3; }
 .hero .small { margin-top: 20px; }
 @media (max-width: 900px) { .hero .wrap { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 480px) { .actions .btn { flex: 1 1 100%; } }
+
+/* the code to scan: always black on white with its quiet margin, in both themes,
+   because a reversed code is not read by every phone. Hidden on a phone,
+   where there is nothing to scan it with. */
+.scan { display: inline-flex; align-items: center; gap: 16px; box-sizing: border-box; height: var(--pair); padding: 0 22px 0 0; border: 1px solid var(--line); border-radius: 18px; overflow: hidden; color: var(--text); transition: border-color .15s ease; }
+.scan:hover { text-decoration: none; border-color: var(--line-strong); }
+/* the white tile fills the card from top to bottom, so the code is as large as the card allows */
+.scan .qr { display: block; height: 100%; width: auto; aspect-ratio: 1; flex: none; }
+.scan b { display: block; font: 600 17px/1.3 var(--body); max-width: 14ch; }
+.scan i { display: block; margin-top: 6px; font: 600 16px/1.3 var(--display); font-style: normal; color: var(--accent-text); }
+.scan.compact { margin-top: 8px; gap: 14px; height: 104px; padding-right: 18px; }
+.scan.compact b { font-size: 15px; }
+.scan.compact i { font-size: 15px; }
+@media (max-width: 760px) { .scan { display: none; } }
+/* first screen: the two buttons one above the other, the code beside them, so
+   that the code is in view as soon as the page opens */
+.start { display: flex; flex-wrap: wrap; align-items: center; gap: 20px 28px; margin-top: 30px; }
+.start .actions { margin-top: 0; }
+/* the card is exactly as tall as the two buttons with the gap between them */
+@media (min-width: 761px) {
+  .start .actions { flex-direction: column; align-items: stretch; gap: var(--pair-gap); }
+  .start .actions .btn { height: var(--button); padding-block: 0; font-size: clamp(16px, 1.05vw, 19px); }
+}
+/* between these widths the left half of the first screen is too narrow for
+   the buttons and the card side by side: the buttons go back in a row, the card under them */
+@media (min-width: 901px) and (max-width: 1079px) {
+  .start .actions { flex-direction: row; align-items: center; gap: 12px; }
+  .start .actions .btn { height: auto; padding-block: 15px; font-size: 16px; }
+}
+/* a low window: less air and a smaller headline, for the same reason */
+@media (min-width: 900px) and (max-height: 760px) {
+  .hero .wrap { padding-block: 22px 36px; }
+  .hero h1 { font-size: clamp(40px, 4.2vw, 54px); margin-top: 12px; }
+  .hero .lead { margin-top: 14px; }
+  .start { margin-top: 20px; }
+}
 
 /* the ring map: everything inside the drawing scales with it, so nothing can collide */
 .map { max-width: 500px; margin-inline: auto; }
@@ -265,6 +306,39 @@ figcaption { margin-top: 14px; font-size: 14px; line-height: 1.5; color: var(--f
   .demo-captions b { display: inline; }
 }
 
+/* before and after: two pictures side by side; two radio buttons choose which pair */
+.compare { position: relative; }
+.compare > input { position: absolute; top: 0; left: 0; opacity: 0; pointer-events: none; }
+.compare-tabs { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 20px; }
+.compare-tabs label { padding: 9px 18px; border-radius: 999px; border: 1px solid var(--line); color: var(--soft); font: 600 15px/1 var(--body); cursor: pointer; transition: border-color .15s ease, color .15s ease; }
+.compare-tabs label:hover { border-color: var(--line-strong); color: var(--text); }
+#compare-start:checked ~ .compare-tabs label[for="compare-start"],
+#compare-answer:checked ~ .compare-tabs label[for="compare-answer"] { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+#compare-start:focus-visible ~ .compare-tabs label[for="compare-start"],
+#compare-answer:focus-visible ~ .compare-tabs label[for="compare-answer"] { outline: 2px solid var(--accent); outline-offset: 3px; }
+.pair { display: none; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 28px; }
+#compare-start:checked ~ .pair[data-pair="start"],
+#compare-answer:checked ~ .pair[data-pair="answer"] { display: grid; }
+.pair .tag { margin-bottom: 10px; font: 600 12px/1.4 var(--body); letter-spacing: .16em; text-transform: uppercase; color: var(--faint); }
+.pair .tag.now { color: var(--accent-text); }
+.pair .frame { aspect-ratio: 1440 / 872; }
+.pair .frame img { height: 100%; object-fit: contain; }
+.compare-note { margin-top: 20px; max-width: 86ch; }
+@media (max-width: 760px) { .pair { grid-template-columns: minmax(0, 1fr); gap: 24px; } }
+/* by hand, and now: one row per chore */
+.byhand { margin-top: 44px; }
+.byhand h3 { font-size: 22px; }
+.byhand .rows { margin-top: 16px; border-top: 1px solid var(--line); }
+.byhand .row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 48px; padding: 16px 0; border-bottom: 1px solid var(--line); font-size: 16px; }
+.byhand .row p { color: var(--soft); }
+.byhand .row p:first-child { color: var(--faint); }
+.byhand .row span { display: block; margin-bottom: 4px; font: 600 11px/1.4 var(--body); letter-spacing: .14em; text-transform: uppercase; color: var(--faint); }
+.byhand .row p:last-child span { color: var(--accent-text); }
+.byhand .row b { font-weight: 600; color: var(--text); }
+@media (max-width: 620px) { .byhand .row { grid-template-columns: minmax(0, 1fr); } }
+/* side by side, the two labels are needed once only, as the heads of the columns */
+@media (min-width: 621px) { .byhand .row:not(:first-child) span { display: none; } }
+
 .features { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 32px 48px; }
 .features h3 { display: flex; align-items: center; gap: 10px; }
 .features h3::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--ring-on); flex: none; }
@@ -289,6 +363,7 @@ figcaption { margin-top: 14px; font-size: 14px; line-height: 1.5; color: var(--f
 footer { border-top: 1px solid var(--line-soft); padding-block: 28px 36px; }
 footer .wrap { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px 40px; }
 footer p { max-width: 64ch; }
+footer .fine { display: grid; gap: 8px; }
 
 .switching *, .switching *::before, .switching *::after { transition: none !important; }
 
@@ -314,6 +389,7 @@ footer p { max-width: 64ch; }
     <nav>
       <a href="#how">How it works</a>
       <a href="#demo">Demo</a>
+      <a class="roomy" href="#before">Before and after</a>
       <a href="#features">Features</a>
       <button class="look" id="look" type="button" aria-label="Switch between dark and light appearance" title="Dark / light">
         <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 3.5a8.5 8.5 0 0 1 0 17z" fill="currentColor"/></svg>
@@ -331,11 +407,14 @@ footer p { max-width: 64ch; }
       <p class="eyebrow">Free and open source / for Fiji and ImageJ</p>
       <h1>Count every cell. The same way, every time.</h1>
       <p class="lead">Cell Quant Studio turns a fluorescence microscope image into numbers you can defend: how many cells, how much of the tissue is marker-positive, and where. No code to write.</p>
-      <div class="actions">
-        <a class="btn" href="https://github.com/KiViKatt/ImageJ-SingleCellQuantificationPlugin">Get it on GitHub</a>
-        <a class="btn quiet" href="#demo">Watch the demo</a>
+      <div class="start">
+        <div class="actions">
+          <a class="btn" href="https://github.com/KiViKatt/ImageJ-SingleCellQuantificationPlugin">Get it on GitHub</a>
+          <a class="btn quiet" href="#demo">Watch the demo</a>
+        </div>
+        <a class="scan" href="https://quantmycells.com"><svg class="qr" viewBox="0 0 33 33" role="img" aria-label="QR code that opens quantmycells.com" shape-rendering="crispEdges"><rect width="33" height="33" fill="#FFFFFF"/><path fill="#000000" d="M4 4h7v1h-7zM12 4h3v1h-3zM18 4h1v1h-1zM22 4h7v1h-7zM4 5h1v1h-1zM10 5h1v1h-1zM12 5h2v1h-2zM17 5h1v1h-1zM20 5h1v1h-1zM22 5h1v1h-1zM28 5h1v1h-1zM4 6h1v1h-1zM6 6h3v1h-3zM10 6h1v1h-1zM12 6h2v1h-2zM15 6h3v1h-3zM19 6h1v1h-1zM22 6h1v1h-1zM24 6h3v1h-3zM28 6h1v1h-1zM4 7h1v1h-1zM6 7h3v1h-3zM10 7h1v1h-1zM14 7h2v1h-2zM17 7h1v1h-1zM20 7h1v1h-1zM22 7h1v1h-1zM24 7h3v1h-3zM28 7h1v1h-1zM4 8h1v1h-1zM6 8h3v1h-3zM10 8h1v1h-1zM12 8h1v1h-1zM17 8h2v1h-2zM20 8h1v1h-1zM22 8h1v1h-1zM24 8h3v1h-3zM28 8h1v1h-1zM4 9h1v1h-1zM10 9h1v1h-1zM14 9h1v1h-1zM16 9h1v1h-1zM18 9h1v1h-1zM22 9h1v1h-1zM28 9h1v1h-1zM4 10h7v1h-7zM12 10h1v1h-1zM14 10h1v1h-1zM16 10h1v1h-1zM18 10h1v1h-1zM20 10h1v1h-1zM22 10h7v1h-7zM16 11h4v1h-4zM4 12h1v1h-1zM7 12h6v1h-6zM14 12h3v1h-3zM18 12h4v1h-4zM24 12h1v1h-1zM26 12h3v1h-3zM5 13h2v1h-2zM14 13h2v1h-2zM19 13h1v1h-1zM21 13h1v1h-1zM23 13h5v1h-5zM6 14h1v1h-1zM9 14h2v1h-2zM12 14h2v1h-2zM16 14h5v1h-5zM22 14h4v1h-4zM28 14h1v1h-1zM4 15h2v1h-2zM7 15h1v1h-1zM11 15h1v1h-1zM13 15h2v1h-2zM18 15h1v1h-1zM20 15h1v1h-1zM22 15h1v1h-1zM25 15h4v1h-4zM6 16h1v1h-1zM8 16h4v1h-4zM14 16h1v1h-1zM18 16h1v1h-1zM22 16h1v1h-1zM28 16h1v1h-1zM4 17h3v1h-3zM9 17h1v1h-1zM11 17h4v1h-4zM16 17h1v1h-1zM18 17h3v1h-3zM24 17h1v1h-1zM27 17h1v1h-1zM4 18h2v1h-2zM7 18h7v1h-7zM18 18h2v1h-2zM22 18h1v1h-1zM24 18h5v1h-5zM4 19h1v1h-1zM7 19h3v1h-3zM11 19h2v1h-2zM14 19h1v1h-1zM16 19h1v1h-1zM18 19h1v1h-1zM21 19h3v1h-3zM25 19h2v1h-2zM28 19h1v1h-1zM4 20h1v1h-1zM6 20h1v1h-1zM10 20h3v1h-3zM15 20h3v1h-3zM20 20h5v1h-5zM26 20h2v1h-2zM12 21h1v1h-1zM15 21h1v1h-1zM20 21h1v1h-1zM24 21h1v1h-1zM26 21h2v1h-2zM4 22h7v1h-7zM12 22h3v1h-3zM16 22h1v1h-1zM18 22h1v1h-1zM20 22h1v1h-1zM22 22h1v1h-1zM24 22h1v1h-1zM28 22h1v1h-1zM4 23h1v1h-1zM10 23h1v1h-1zM12 23h1v1h-1zM14 23h2v1h-2zM17 23h1v1h-1zM19 23h2v1h-2zM24 23h1v1h-1zM28 23h1v1h-1zM4 24h1v1h-1zM6 24h3v1h-3zM10 24h1v1h-1zM12 24h5v1h-5zM18 24h7v1h-7zM4 25h1v1h-1zM6 25h3v1h-3zM10 25h1v1h-1zM12 25h1v1h-1zM14 25h1v1h-1zM16 25h3v1h-3zM20 25h3v1h-3zM27 25h2v1h-2zM4 26h1v1h-1zM6 26h3v1h-3zM10 26h1v1h-1zM13 26h3v1h-3zM17 26h1v1h-1zM21 26h1v1h-1zM24 26h5v1h-5zM4 27h1v1h-1zM10 27h1v1h-1zM13 27h1v1h-1zM15 27h1v1h-1zM18 27h2v1h-2zM23 27h2v1h-2zM26 27h3v1h-3zM4 28h7v1h-7zM12 28h1v1h-1zM16 28h1v1h-1zM20 28h2v1h-2zM25 28h1v1h-1zM28 28h1v1h-1z"/></svg><span><b>Scan to open this page on your phone</b><i>quantmycells.com</i></span></a>
       </div>
-      <p class="small">Runs inside Fiji on Windows, macOS and Linux.</p>
+      <p class="small">Runs inside Fiji. Tested on Windows and macOS.</p>
     </div>
 
     <div>
@@ -441,6 +520,44 @@ footer p { max-width: 64ch; }
   </div>
 </section>
 
+<section id="before">
+  <div class="wrap">
+    <div class="head reveal">
+      <p class="eyebrow">Before and after</p>
+      <h2>From a pile of windows to one clear screen</h2>
+      <p class="lead">In plain Fiji this job is a tour of menus and small windows, repeated for every channel, every region and every image. Here it is three buttons.</p>
+    </div>
+    <div class="compare reveal">
+      <input type="radio" name="compare" id="compare-start" checked>
+      <input type="radio" name="compare" id="compare-answer">
+      <div class="compare-tabs">
+        <label for="compare-start">Starting an analysis</label>
+        <label for="compare-answer">Reading the answer</label>
+      </div>
+      <div class="pair" data-pair="start">
+        <figure><p class="tag">Before: plain Fiji</p><div class="frame"><img src="img/before-1.jpg" alt="Plain Fiji set up for the same job: the toolbar, the image with a threshold shown in red, the Channels tool, the Threshold window, ROI Manager and the Analyze Particles dialog" width="1440" height="872" loading="lazy"></div><figcaption>Fiji's own tools: a window for each step, opened from the menus, for one channel at a time.</figcaption></figure>
+        <figure><p class="tag now">After: Cell Quant Studio</p><div class="frame"><img class="shot-dark" src="img/demo-1.jpg" alt="The Session tab now: the image, its channels and three numbered steps" width="1440" height="872" loading="lazy"><img class="shot-light" src="img/demo-1-light.jpg" alt="The Session tab now: the image, its channels and three numbered steps" width="1440" height="872" loading="lazy"></div><figcaption>The image, its channels with their wavelengths, and three numbered steps.</figcaption></figure>
+      </div>
+      <div class="pair" data-pair="answer">
+        <figure><p class="tag">Before: plain Fiji</p><div class="frame"><img src="img/before-2.jpg" alt="Plain Fiji after Analyze Particles: a Results table with one row per particle, a Process Stack question and a Summary table with one line" width="1440" height="872" loading="lazy"></div><figcaption>A table with a row per particle and one summary line, for one channel and one region.</figcaption></figure>
+        <figure><p class="tag now">After: Cell Quant Studio</p><div class="frame"><img class="shot-dark" src="img/demo-3.jpg" alt="The Results tab now: totals, one ring per zone and the regions" width="1440" height="872" loading="lazy"><img class="shot-light" src="img/demo-3-light.jpg" alt="The Results tab now: totals, one ring per zone and the regions" width="1440" height="872" loading="lazy"></div><figcaption>Every region and channel on one screen, with the picture to check it against.</figcaption></figure>
+      </div>
+      <p class="small compare-note">Both sides use the same synthetic test image. The windows on the left are Fiji's own, captured one by one and arranged for the picture.</p>
+    </div>
+    <div class="byhand reveal">
+      <h3>The work it takes off your hands</h3>
+      <div class="rows">
+        <div class="row"><p><span>By hand in Fiji</span>Open every channel, project its Z stack and subtract the background, menu by menu.</p><p><span>With Cell Quant Studio</span><b>1 Prepare channels</b> does it for every channel, the same way each time.</p></div>
+        <div class="row"><p><span>By hand in Fiji</span>Set a threshold by eye, again for every image.</p><p><span>With Cell Quant Studio</span>The way to threshold is part of a saved profile and is applied to every image.</p></div>
+        <div class="row"><p><span>By hand in Fiji</span>Outline the tissue by hand.</p><p><span>With Cell Quant Studio</span><b>Detect tissue outline</b> finds it, and depth from the surface is measured for you.</p></div>
+        <div class="row"><p><span>By hand in Fiji</span>Run Analyze Particles region by region and channel by channel, then copy the numbers into a spreadsheet.</p><p><span>With Cell Quant Studio</span><b>3 Analyse</b> measures every region and channel and writes the tables.</p></div>
+        <div class="row"><p><span>By hand in Fiji</span>Do all of it again for the next image.</p><p><span>With Cell Quant Studio</span>A batch runs a whole folder with one profile.</p></div>
+        <div class="row"><p><span>By hand in Fiji</span>Try to remember which settings gave which numbers.</p><p><span>With Cell Quant Studio</span>Every run saves its settings, thresholds and versions next to its results.</p></div>
+      </div>
+    </div>
+  </div>
+</section>
+
 <section id="features">
   <div class="wrap">
     <div class="head reveal">
@@ -491,6 +608,7 @@ footer p { max-width: 64ch; }
         <a class="btn" href="https://github.com/KiViKatt/ImageJ-SingleCellQuantificationPlugin">Get it on GitHub</a>
         <a class="btn quiet" href="https://github.com/KiViKatt/ImageJ-SingleCellQuantificationPlugin#readme">Read the guide</a>
         <p class="small">Free to use, study and change under the GNU General Public License, version 3 or later.</p>
+        <a class="scan compact" href="https://quantmycells.com"><svg class="qr" viewBox="0 0 33 33" role="img" aria-label="QR code that opens quantmycells.com" shape-rendering="crispEdges"><rect width="33" height="33" fill="#FFFFFF"/><path fill="#000000" d="M4 4h7v1h-7zM12 4h3v1h-3zM18 4h1v1h-1zM22 4h7v1h-7zM4 5h1v1h-1zM10 5h1v1h-1zM12 5h2v1h-2zM17 5h1v1h-1zM20 5h1v1h-1zM22 5h1v1h-1zM28 5h1v1h-1zM4 6h1v1h-1zM6 6h3v1h-3zM10 6h1v1h-1zM12 6h2v1h-2zM15 6h3v1h-3zM19 6h1v1h-1zM22 6h1v1h-1zM24 6h3v1h-3zM28 6h1v1h-1zM4 7h1v1h-1zM6 7h3v1h-3zM10 7h1v1h-1zM14 7h2v1h-2zM17 7h1v1h-1zM20 7h1v1h-1zM22 7h1v1h-1zM24 7h3v1h-3zM28 7h1v1h-1zM4 8h1v1h-1zM6 8h3v1h-3zM10 8h1v1h-1zM12 8h1v1h-1zM17 8h2v1h-2zM20 8h1v1h-1zM22 8h1v1h-1zM24 8h3v1h-3zM28 8h1v1h-1zM4 9h1v1h-1zM10 9h1v1h-1zM14 9h1v1h-1zM16 9h1v1h-1zM18 9h1v1h-1zM22 9h1v1h-1zM28 9h1v1h-1zM4 10h7v1h-7zM12 10h1v1h-1zM14 10h1v1h-1zM16 10h1v1h-1zM18 10h1v1h-1zM20 10h1v1h-1zM22 10h7v1h-7zM16 11h4v1h-4zM4 12h1v1h-1zM7 12h6v1h-6zM14 12h3v1h-3zM18 12h4v1h-4zM24 12h1v1h-1zM26 12h3v1h-3zM5 13h2v1h-2zM14 13h2v1h-2zM19 13h1v1h-1zM21 13h1v1h-1zM23 13h5v1h-5zM6 14h1v1h-1zM9 14h2v1h-2zM12 14h2v1h-2zM16 14h5v1h-5zM22 14h4v1h-4zM28 14h1v1h-1zM4 15h2v1h-2zM7 15h1v1h-1zM11 15h1v1h-1zM13 15h2v1h-2zM18 15h1v1h-1zM20 15h1v1h-1zM22 15h1v1h-1zM25 15h4v1h-4zM6 16h1v1h-1zM8 16h4v1h-4zM14 16h1v1h-1zM18 16h1v1h-1zM22 16h1v1h-1zM28 16h1v1h-1zM4 17h3v1h-3zM9 17h1v1h-1zM11 17h4v1h-4zM16 17h1v1h-1zM18 17h3v1h-3zM24 17h1v1h-1zM27 17h1v1h-1zM4 18h2v1h-2zM7 18h7v1h-7zM18 18h2v1h-2zM22 18h1v1h-1zM24 18h5v1h-5zM4 19h1v1h-1zM7 19h3v1h-3zM11 19h2v1h-2zM14 19h1v1h-1zM16 19h1v1h-1zM18 19h1v1h-1zM21 19h3v1h-3zM25 19h2v1h-2zM28 19h1v1h-1zM4 20h1v1h-1zM6 20h1v1h-1zM10 20h3v1h-3zM15 20h3v1h-3zM20 20h5v1h-5zM26 20h2v1h-2zM12 21h1v1h-1zM15 21h1v1h-1zM20 21h1v1h-1zM24 21h1v1h-1zM26 21h2v1h-2zM4 22h7v1h-7zM12 22h3v1h-3zM16 22h1v1h-1zM18 22h1v1h-1zM20 22h1v1h-1zM22 22h1v1h-1zM24 22h1v1h-1zM28 22h1v1h-1zM4 23h1v1h-1zM10 23h1v1h-1zM12 23h1v1h-1zM14 23h2v1h-2zM17 23h1v1h-1zM19 23h2v1h-2zM24 23h1v1h-1zM28 23h1v1h-1zM4 24h1v1h-1zM6 24h3v1h-3zM10 24h1v1h-1zM12 24h5v1h-5zM18 24h7v1h-7zM4 25h1v1h-1zM6 25h3v1h-3zM10 25h1v1h-1zM12 25h1v1h-1zM14 25h1v1h-1zM16 25h3v1h-3zM20 25h3v1h-3zM27 25h2v1h-2zM4 26h1v1h-1zM6 26h3v1h-3zM10 26h1v1h-1zM13 26h3v1h-3zM17 26h1v1h-1zM21 26h1v1h-1zM24 26h5v1h-5zM4 27h1v1h-1zM10 27h1v1h-1zM13 27h1v1h-1zM15 27h1v1h-1zM18 27h2v1h-2zM23 27h2v1h-2zM26 27h3v1h-3zM4 28h7v1h-7zM12 28h1v1h-1zM16 28h1v1h-1zM20 28h2v1h-2zM25 28h1v1h-1zM28 28h1v1h-1z"/></svg><span><b>Scan to open on your phone</b><i>quantmycells.com</i></span></a>
       </div>
     </div>
   </div>
@@ -500,7 +618,10 @@ footer p { max-width: 64ch; }
 
 <footer>
   <div class="wrap">
-    <p class="small">Cell Quant Studio Universal. Copyright 2026 Ivan Khimach and Maksym Taran. Code under GPL-3.0-or-later. Typefaces: Chakra Petch and IBM Plex Sans, SIL Open Font License.</p>
+    <div class="fine">
+      <p class="small">Cell Quant Studio Universal. Copyright 2026 Ivan Khimach and Maksym Taran. Code under GPL-3.0-or-later. Typefaces: Chakra Petch and IBM Plex Sans, SIL Open Font License.</p>
+      <p class="small">Free research software, provided without warranty. It is not a medical device and is not meant for diagnosis. Not affiliated with or endorsed by the Fiji or ImageJ projects; all product names belong to their owners.</p>
+    </div>
     <p class="small"><a href="https://github.com/KiViKatt/ImageJ-SingleCellQuantificationPlugin">Source on GitHub</a> &nbsp;/&nbsp; <a href="https://github.com/KiViKatt/ImageJ-SingleCellQuantificationPlugin/issues">Report a problem</a></p>
   </div>
 </footer>

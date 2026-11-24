@@ -1,0 +1,7 @@
+# Cloudflare Pages: headers for every file, and a long cache for the typefaces
+# (their file names never change content).
+/*
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+/fonts/*
+  Cache-Control: public, max-age=31536000, immutable
