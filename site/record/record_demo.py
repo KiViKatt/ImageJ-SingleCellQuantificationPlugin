@@ -295,6 +295,14 @@ def main():
             if names[index].startswith("DAPI") and canvas.metrics()[index]["unit"] == "count":
                 first = index
 
+        def tables():
+            # What the Results tab shows first: the Researcher view, plain tables.
+            frame.set_results_view("Researcher", False)
+            frame.main_tabs.setSelectedIndex(results_index)
+            frame.validate()
+        if hasattr(frame, "set_results_view"):
+            in_both_looks(frame, "3_research", tables)
+
         def counts():
             to_results()
             canvas.choose_metric(first)

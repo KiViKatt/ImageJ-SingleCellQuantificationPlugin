@@ -30,12 +30,14 @@ from java.util import Random
 from ij import ImagePlus
 from ij.gui import OvalRoi, PolygonRoi, Roi
 from ij.plugin.filter import EDM
-from ij.process import FloatProcessor, ByteProcessor
+from ij.process import FloatProcessor, ByteProcessor, ImageProcessor
 
 SIZE = int(os.environ.get("CQ_DEMO_SIZE", "4084"))
 PIXEL = 0.2076 * 4084.0 / SIZE
 OUT = os.environ["CQ_DEMO_IMAGE"]
 rnd = Random(20261120)
+# The noise of ImageJ is seeded too, so that the image is the same every time.
+ImageProcessor.setRandomSeed(20261120.0)
 
 center = SIZE / 2.0
 radius = 355.0 / PIXEL
@@ -150,6 +152,10 @@ FACTS = {
     "TBR2": ("Alexa Fluor 488", 488.0, 520.0, (0, 255, 0))
 }
 planes = [plane(name) for name in ORDER]
+# The same numbers on every run mean the same image on every run.
+for check_index in range(len(ORDER)):
+    check = planes[check_index].getStatistics()
+    print("%s pixels: mean %r, standard deviation %r" % (ORDER[check_index], check.mean, check.stdDev))
 
 from loci.common import DataTools
 from loci.formats import MetadataTools

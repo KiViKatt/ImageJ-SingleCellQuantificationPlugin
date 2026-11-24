@@ -13,7 +13,7 @@ One static page that introduces Cell Quant Studio to people outside the field. T
 ## What is on the page
 
 - **A light and a dark theme.** The page follows the system; the round button in the top bar switches, and the choice is remembered in the browser. The colors are those of the application's Light and Dark looks.
-- **The demo.** Six steps, the same as the one-click demo in [`../demo/`](../demo/): open the image, find the tissue, analyse, point at a zone, switch the marker, check the picture. It starts by itself when it is scrolled into view and has a Play and Pause button; picking a step stops it. Without scripts the step buttons still work.
+- **The demo.** Seven steps, following the one-click demo in [`../demo/`](../demo/): open the image, find the tissue, analyse (the Researcher view, which the Results tab shows first), see the map (the Pitch view), point at a zone, switch the marker, check the picture. It starts by itself when it is scrolled into view and has a Play and Pause button; picking a step stops it. Without scripts the step buttons still work.
 - **The ring map at the top** shows the numbers of the demo run.
 - **A QR code** for `https://quantmycells.com`, beside the two buttons on the first screen and again in the install panel, for people who watch the page on a shared screen or a stream. It is always black on white, and it is hidden on phones. The card on the first screen is exactly as tall as the two buttons.
 - **Before and after.** Plain Fiji with its own tools on the left, Cell Quant Studio on the right, for starting an analysis and for reading the answer; under it, the chores the application takes over.
@@ -22,7 +22,7 @@ One static page that introduces Cell Quant Studio to people outside the field. T
 
 The demo was recorded on a test image made by `record/make_demo_image.py`, not on real tissue. Nuclei are drawn as blurred ovals, and a share of them, larger near the surface, is lit in each marker channel, so that the depth zones differ. The page says so under the demo. Its numbers say nothing about biology.
 
-In that run 2,600 nuclei were drawn and the headline count is 2,703. The difference is expected: the three depth zones share borders, a nucleus lying on a border is clipped there, and each part that passes the size filter is counted in its own zone.
+In that run 2,600 nuclei were drawn and the headline count is 2,699. The difference is expected: the three depth zones share borders, a nucleus lying on a border is clipped there, and each part that passes the size filter is counted in its own zone.
 
 ## The "before" pictures
 
@@ -58,12 +58,13 @@ bash tests/run_tests.sh <Fiji> "$PWD/site/record/record_demo.py"
 |---|---|
 | `dark_2_profile.png`, `light_2_profile.png` | `img/demo-1.jpg`, `img/demo-1-light.jpg` |
 | `zones.png` | `img/demo-2.jpg` |
-| `dark_3_results.png`, `light_3_results.png` | `img/demo-3.jpg`, `img/demo-3-light.jpg` |
-| `dark_4_point.png`, `light_4_point.png` | `img/demo-4.jpg`, `img/demo-4-light.jpg` |
-| `dark_5_marker.png`, `light_5_marker.png` | `img/demo-5.jpg`, `img/demo-5-light.jpg` |
-| `dark_6_picture.png`, `light_6_picture.png` | `img/demo-6.jpg`, `img/demo-6-light.jpg` |
+| `dark_3_research.png`, `light_3_research.png` | `img/demo-3.jpg`, `img/demo-3-light.jpg` |
+| `dark_3_results.png`, `light_3_results.png` | `img/demo-4.jpg`, `img/demo-4-light.jpg` |
+| `dark_4_point.png`, `light_4_point.png` | `img/demo-5.jpg`, `img/demo-5-light.jpg` |
+| `dark_5_marker.png`, `light_5_marker.png` | `img/demo-6.jpg`, `img/demo-6-light.jpg` |
+| `dark_6_picture.png`, `light_6_picture.png` | `img/demo-7.jpg`, `img/demo-7-light.jpg` |
 
-If the numbers of the run change, change them in the ring map at the top of `index.html` too (the total, the three zone values and the lengths of the arcs).
+If the numbers of the run change, change them in the ring map at the top of `index.html` too (the total, the three zone values and the lengths of the arcs). The pictures now on the page were recorded before the noise of the test image was seeded, so the next recording can differ from them by a few nuclei; after that the image, and with it the numbers, stay the same.
 
 ## Publishing
 

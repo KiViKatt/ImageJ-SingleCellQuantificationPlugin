@@ -11,7 +11,7 @@
 <meta property="og:title" content="Cell Quant Studio">
 <meta property="og:description" content="Count cells and measure markers in fluorescence microscopy images, the same way every time. Free and open source, for Fiji/ImageJ.">
 <meta property="og:url" content="https://quantmycells.com/">
-<meta property="og:image" content="https://quantmycells.com/img/demo-3.jpg">
+<meta property="og:image" content="https://quantmycells.com/img/demo-4.jpg">
 <link rel="canonical" href="https://quantmycells.com/">
 <meta name="theme-color" id="themeColor" content="#000000">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23000000'/%3E%3Ccircle cx='32' cy='32' r='22' fill='none' stroke='%23F5F5F7' stroke-width='6' stroke-dasharray='110 200' stroke-linecap='round' transform='rotate(-90 32 32)'/%3E%3Ccircle cx='32' cy='32' r='12' fill='none' stroke='%23AEAEB2' stroke-width='5' stroke-dasharray='48 100' stroke-linecap='round' transform='rotate(-90 32 32)'/%3E%3Ccircle cx='32' cy='32' r='4' fill='%230A84FF'/%3E%3C/svg%3E">
@@ -241,26 +241,30 @@ figcaption { margin-top: 14px; font-size: 14px; line-height: 1.5; color: var(--f
 #demo-3:checked ~ .demo-tabs label[for="demo-3"],
 #demo-4:checked ~ .demo-tabs label[for="demo-4"],
 #demo-5:checked ~ .demo-tabs label[for="demo-5"],
-#demo-6:checked ~ .demo-tabs label[for="demo-6"] { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+#demo-6:checked ~ .demo-tabs label[for="demo-6"],
+#demo-7:checked ~ .demo-tabs label[for="demo-7"] { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
 #demo-1:checked ~ .demo-tabs label[for="demo-1"] i,
 #demo-2:checked ~ .demo-tabs label[for="demo-2"] i,
 #demo-3:checked ~ .demo-tabs label[for="demo-3"] i,
 #demo-4:checked ~ .demo-tabs label[for="demo-4"] i,
 #demo-5:checked ~ .demo-tabs label[for="demo-5"] i,
-#demo-6:checked ~ .demo-tabs label[for="demo-6"] i { background: rgba(255, 255, 255, .22); color: var(--on-accent); }
+#demo-6:checked ~ .demo-tabs label[for="demo-6"] i,
+#demo-7:checked ~ .demo-tabs label[for="demo-7"] i { background: rgba(255, 255, 255, .22); color: var(--on-accent); }
 #demo-1:focus-visible ~ .demo-tabs label[for="demo-1"],
 #demo-2:focus-visible ~ .demo-tabs label[for="demo-2"],
 #demo-3:focus-visible ~ .demo-tabs label[for="demo-3"],
 #demo-4:focus-visible ~ .demo-tabs label[for="demo-4"],
 #demo-5:focus-visible ~ .demo-tabs label[for="demo-5"],
-#demo-6:focus-visible ~ .demo-tabs label[for="demo-6"] { outline: 2px solid var(--accent); outline-offset: 3px; }
+#demo-6:focus-visible ~ .demo-tabs label[for="demo-6"],
+#demo-7:focus-visible ~ .demo-tabs label[for="demo-7"] { outline: 2px solid var(--accent); outline-offset: 3px; }
 .demo-stage figure { display: none; }
 #demo-1:checked ~ .demo-stage figure[data-step="1"],
 #demo-2:checked ~ .demo-stage figure[data-step="2"],
 #demo-3:checked ~ .demo-stage figure[data-step="3"],
 #demo-4:checked ~ .demo-stage figure[data-step="4"],
 #demo-5:checked ~ .demo-stage figure[data-step="5"],
-#demo-6:checked ~ .demo-stage figure[data-step="6"] { display: block; }
+#demo-6:checked ~ .demo-stage figure[data-step="6"],
+#demo-7:checked ~ .demo-stage figure[data-step="7"] { display: block; }
 .demo-stage .frame { aspect-ratio: 1440 / 872; }
 .demo-stage .frame img { height: 100%; object-fit: contain; }
 .demo-stage figure[data-step="2"] .frame { background: #000000; }
@@ -268,7 +272,7 @@ figcaption { margin-top: 14px; font-size: 14px; line-height: 1.5; color: var(--f
 .js .demo-bar { display: flex; }
 .demo-play { font: 600 14px/1 var(--body); color: var(--text); background: none; border: 1px solid var(--line-strong); border-radius: 999px; padding: 11px 0; width: 88px; flex: none; cursor: pointer; transition: border-color .15s ease; }
 .demo-play:hover { border-color: var(--accent); }
-.demo-ticks { flex: 1 1 auto; min-width: 0; display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 6px; }
+.demo-ticks { flex: 1 1 auto; min-width: 0; display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px; }
 .demo-ticks i { position: relative; height: 4px; border-radius: 2px; background: var(--track); overflow: hidden; }
 .demo-ticks i::after { content: ""; position: absolute; inset: 0; background: var(--ring-on); transform: scaleX(0); transform-origin: left center; }
 .demo-ticks i.done::after, .demo-ticks i.now::after { transform: scaleX(1); }
@@ -284,7 +288,8 @@ figcaption { margin-top: 14px; font-size: 14px; line-height: 1.5; color: var(--f
 #demo-3:checked ~ .demo-captions p[data-step="3"],
 #demo-4:checked ~ .demo-captions p[data-step="4"],
 #demo-5:checked ~ .demo-captions p[data-step="5"],
-#demo-6:checked ~ .demo-captions p[data-step="6"] { display: block; }
+#demo-6:checked ~ .demo-captions p[data-step="6"],
+#demo-7:checked ~ .demo-captions p[data-step="7"] { display: block; }
 .demo-note { margin-top: 20px; max-width: 78ch; }
 @media (max-width: 1100px) { .demo-captions { min-height: 5.1em; } }
 @media (min-width: 1240px) {
@@ -298,7 +303,7 @@ figcaption { margin-top: 14px; font-size: 14px; line-height: 1.5; color: var(--f
 }
 @media (max-width: 760px) {
   /* on a phone: six equal buttons with the numbers alone, always in one row */
-  .demo-tabs { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 6px; }
+  .demo-tabs { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px; }
   .demo-tabs b { display: none; }
   .demo-tabs label { padding: 8px 0; justify-content: center; }
   .demo-tabs i { width: 26px; height: 26px; font-size: 13px; }
@@ -419,27 +424,27 @@ footer .fine { display: grid; gap: 8px; }
 
     <div>
       <div class="map" id="map">
-        <svg viewBox="0 0 520 520" role="img" aria-label="Example result: 2,703 nuclei in three depth zones, drawn as three rings">
+        <svg viewBox="0 0 520 520" role="img" aria-label="Example result: 2,699 nuclei in three depth zones, drawn as three rings">
           <g class="ring r1" data-length="1457.7">
             <circle class="track" cx="260" cy="260" r="232"/>
             <circle class="arc" cx="260" cy="260" r="232" stroke-dasharray="1457.7 1457.7" transform="rotate(-90 260 260)"/>
           </g>
-          <g class="ring r2" data-length="869.5">
+          <g class="ring r2" data-length="871.7">
             <circle class="track" cx="260" cy="260" r="166"/>
-            <circle class="arc" cx="260" cy="260" r="166" stroke-dasharray="869.5 1043" transform="rotate(-90 260 260)"/>
+            <circle class="arc" cx="260" cy="260" r="166" stroke-dasharray="871.7 1043" transform="rotate(-90 260 260)"/>
           </g>
-          <g class="ring r3" data-length="275.1">
+          <g class="ring r3" data-length="275.3">
             <circle class="track" cx="260" cy="260" r="100"/>
-            <circle class="arc" cx="260" cy="260" r="100" stroke-dasharray="275.1 628.3" transform="rotate(-90 260 260)"/>
+            <circle class="arc" cx="260" cy="260" r="100" stroke-dasharray="275.3 628.3" transform="rotate(-90 260 260)"/>
           </g>
-          <text class="value" id="mapValue" x="260" y="263">2,703</text>
+          <text class="value" id="mapValue" x="260" y="263">2,699</text>
           <text class="unit" id="mapUnit" x="260" y="296">NUCLEI</text>
         </svg>
       </div>
       <div class="legend" id="legend">
-        <button type="button" style="--c:var(--ring1)" data-value="1,190" data-name="0–100 µm"><b>1,190</b><span><i></i>0–100 µm</span></button>
+        <button type="button" style="--c:var(--ring1)" data-value="1,187" data-name="0–100 µm"><b>1,187</b><span><i></i>0–100 µm</span></button>
         <button type="button" style="--c:var(--ring2)" data-value="992" data-name="100–200 µm"><b>992</b><span><i></i>100–200 µm</span></button>
-        <button type="button" style="--c:var(--ring3)" data-value="521" data-name="Over 200 µm"><b>521</b><span><i></i>Over 200 µm</span></button>
+        <button type="button" style="--c:var(--ring3)" data-value="520" data-name="Over 200 µm"><b>520</b><span><i></i>Over 200 µm</span></button>
       </div>
       <p class="small map-note">Nuclei by depth from the surface, in the demo run below.</p>
     </div>
@@ -477,7 +482,7 @@ footer .fine { display: grid; gap: 8px; }
     <div class="head reveal">
       <p class="eyebrow">The one-minute demo</p>
       <h2>Watch it run, start to finish</h2>
-      <p class="lead">Six steps, recorded from the real window. In Fiji they run by themselves with one click. Press play, or pick a step.</p>
+      <p class="lead">Seven steps, recorded from the real window. In Fiji they run by themselves with one click. Press play, or pick a step.</p>
     </div>
     <div class="demo reveal" id="demoPlayer">
       <input type="radio" name="demo" id="demo-1" checked>
@@ -486,34 +491,38 @@ footer .fine { display: grid; gap: 8px; }
       <input type="radio" name="demo" id="demo-4">
       <input type="radio" name="demo" id="demo-5">
       <input type="radio" name="demo" id="demo-6">
+      <input type="radio" name="demo" id="demo-7">
       <div class="demo-tabs">
         <label for="demo-1"><i>1</i><b>Open the image</b></label>
         <label for="demo-2"><i>2</i><b>Find the tissue</b></label>
         <label for="demo-3"><i>3</i><b>Analyse</b></label>
-        <label for="demo-4"><i>4</i><b>Point at a zone</b></label>
-        <label for="demo-5"><i>5</i><b>Switch the marker</b></label>
-        <label for="demo-6"><i>6</i><b>Check the picture</b></label>
+        <label for="demo-4"><i>4</i><b>See the map</b></label>
+        <label for="demo-5"><i>5</i><b>Point at a zone</b></label>
+        <label for="demo-6"><i>6</i><b>Switch the marker</b></label>
+        <label for="demo-7"><i>7</i><b>Check the picture</b></label>
       </div>
       <div class="demo-stage">
         <figure data-step="1"><div class="frame"><img class="shot-dark" src="img/demo-1.jpg" alt="The Session tab with the image loaded: its size, and four channels listed with their wavelengths and names" width="1440" height="872" loading="lazy"><img class="shot-light" src="img/demo-1-light.jpg" alt="The Session tab with the image loaded: its size, and four channels listed with their wavelengths and names" width="1440" height="872" loading="lazy"></div></figure>
         <figure data-step="2"><div class="frame"><img src="img/demo-2.jpg" alt="The image with the tissue outline and three depth zones drawn on it" width="872" height="872" loading="lazy"></div></figure>
-        <figure data-step="3"><div class="frame"><img class="shot-dark" src="img/demo-3.jpg" alt="The Results tab: totals on the left, three rings in the middle, one row per zone on the right" width="1440" height="872" loading="lazy"><img class="shot-light" src="img/demo-3-light.jpg" alt="The Results tab: totals on the left, three rings in the middle, one row per zone on the right" width="1440" height="872" loading="lazy"></div></figure>
-        <figure data-step="4"><div class="frame"><img class="shot-dark" src="img/demo-4.jpg" alt="The outer ring lit in blue, with its row and its outline on the picture" width="1440" height="872" loading="lazy"><img class="shot-light" src="img/demo-4-light.jpg" alt="The outer ring lit in blue, with its row and its outline on the picture" width="1440" height="872" loading="lazy"></div></figure>
-        <figure data-step="5"><div class="frame"><img class="shot-dark" src="img/demo-5.jpg" alt="The rings showing the area positive for TBR2 in each zone: about 10 percent in the outer two, 3 percent in the core" width="1440" height="872" loading="lazy"><img class="shot-light" src="img/demo-5-light.jpg" alt="The rings showing the area positive for TBR2 in each zone: about 10 percent in the outer two, 3 percent in the core" width="1440" height="872" loading="lazy"></div></figure>
-        <figure data-step="6"><div class="frame"><img class="shot-dark" src="img/demo-6.jpg" alt="The whole image with the three zones named and every counted nucleus outlined" width="1440" height="872" loading="lazy"><img class="shot-light" src="img/demo-6-light.jpg" alt="The whole image with the three zones named and every counted nucleus outlined" width="1440" height="872" loading="lazy"></div></figure>
+        <figure data-step="3"><div class="frame"><img class="shot-dark" src="img/demo-3.jpg" alt="The Results tab in its Researcher view: a table with one column per zone, the thresholds used, and the image with every counted nucleus outlined" width="1440" height="872" loading="lazy"><img class="shot-light" src="img/demo-3-light.jpg" alt="The Results tab in its Researcher view: a table with one column per zone, the thresholds used, and the image with every counted nucleus outlined" width="1440" height="872" loading="lazy"></div></figure>
+        <figure data-step="4"><div class="frame"><img class="shot-dark" src="img/demo-4.jpg" alt="The Results tab in its Pitch view: totals on the left, three rings in the middle, one row per zone on the right" width="1440" height="872" loading="lazy"><img class="shot-light" src="img/demo-4-light.jpg" alt="The Results tab in its Pitch view: totals on the left, three rings in the middle, one row per zone on the right" width="1440" height="872" loading="lazy"></div></figure>
+        <figure data-step="5"><div class="frame"><img class="shot-dark" src="img/demo-5.jpg" alt="The outer ring lit in blue, with its row and its outline on the picture" width="1440" height="872" loading="lazy"><img class="shot-light" src="img/demo-5-light.jpg" alt="The outer ring lit in blue, with its row and its outline on the picture" width="1440" height="872" loading="lazy"></div></figure>
+        <figure data-step="6"><div class="frame"><img class="shot-dark" src="img/demo-6.jpg" alt="The rings showing the area positive for TBR2 in each zone: about 10 percent in the outer two, 3 percent in the core" width="1440" height="872" loading="lazy"><img class="shot-light" src="img/demo-6-light.jpg" alt="The rings showing the area positive for TBR2 in each zone: about 10 percent in the outer two, 3 percent in the core" width="1440" height="872" loading="lazy"></div></figure>
+        <figure data-step="7"><div class="frame"><img class="shot-dark" src="img/demo-7.jpg" alt="The whole image with the three zones named and every counted nucleus outlined" width="1440" height="872" loading="lazy"><img class="shot-light" src="img/demo-7-light.jpg" alt="The whole image with the three zones named and every counted nucleus outlined" width="1440" height="872" loading="lazy"></div></figure>
       </div>
       <div class="demo-bar">
         <button type="button" class="demo-play" id="demoPlay" aria-pressed="false">Play</button>
-        <div class="demo-ticks" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i></div>
-        <span class="demo-count" id="demoCount">1 / 6</span>
+        <div class="demo-ticks" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+        <span class="demo-count" id="demoCount">1 / 7</span>
       </div>
       <div class="demo-captions">
         <p data-step="1"><b>Open the image.</b> The app reads the microscope file: its size in micrometres and every channel with its wavelength. A channel called DAPI that is not on the 405 nm laser would be flagged.</p>
         <p data-step="2"><b>Find the tissue.</b> It outlines the organoid and divides it into three zones by depth from the surface: 0–100 µm, 100–200 µm and deeper.</p>
-        <p data-step="3"><b>Analyse.</b> One click. Every nucleus is counted and four channels are measured in each zone. Every setting is saved next to the numbers.</p>
-        <p data-step="4"><b>Point at a zone.</b> Each ring is one zone. Point at a ring, and its row and its outline on the picture light up with it.</p>
-        <p data-step="5"><b>Switch the marker.</b> Choose another stain and the rings redraw. Here the marker is strong near the surface and fades toward the core.</p>
-        <p data-step="6"><b>Check the picture.</b> Every counted nucleus is outlined on the image, so a count can be checked by eye, not just trusted.</p>
+        <p data-step="3"><b>Analyse.</b> One click. Every nucleus is counted and four channels are measured in each zone. The answer is one table, with the thresholds that were used and a picture to check the outlines.</p>
+        <p data-step="4"><b>See the map.</b> The Pitch view turns the same numbers into rings, one ring per zone, for showing the result to someone else.</p>
+        <p data-step="5"><b>Point at a zone.</b> Point at a ring, and its row and its outline on the picture light up with it.</p>
+        <p data-step="6"><b>Switch the marker.</b> Choose another stain and the rings redraw. Here the marker is strong near the surface and fades toward the core.</p>
+        <p data-step="7"><b>Check the picture.</b> Every counted nucleus is outlined on the image, so a count can be checked by eye, not just trusted.</p>
       </div>
       <p class="small demo-note">Recorded on a synthetic test image built to look like an organoid section, with the demo's own settings. It is not real tissue, and its numbers say nothing about biology.</p>
     </div>
@@ -540,7 +549,7 @@ footer .fine { display: grid; gap: 8px; }
       </div>
       <div class="pair" data-pair="answer">
         <figure><p class="tag">Before: plain Fiji</p><div class="frame"><img src="img/before-2.jpg" alt="Plain Fiji after Analyze Particles: a Results table with one row per particle, a Process Stack question and a Summary table with one line" width="1440" height="872" loading="lazy"></div><figcaption>A table with a row per particle and one summary line, for one channel and one region.</figcaption></figure>
-        <figure><p class="tag now">After: Cell Quant Studio</p><div class="frame"><img class="shot-dark" src="img/demo-3.jpg" alt="The Results tab now: totals, one ring per zone and the regions" width="1440" height="872" loading="lazy"><img class="shot-light" src="img/demo-3-light.jpg" alt="The Results tab now: totals, one ring per zone and the regions" width="1440" height="872" loading="lazy"></div><figcaption>Every region and channel on one screen, with the picture to check it against.</figcaption></figure>
+        <figure><p class="tag now">After: Cell Quant Studio</p><div class="frame"><img class="shot-dark" src="img/demo-3.jpg" alt="The Results tab now: one table with every zone and channel, the thresholds used, and the image with the outlines" width="1440" height="872" loading="lazy"><img class="shot-light" src="img/demo-3-light.jpg" alt="The Results tab now: one table with every zone and channel, the thresholds used, and the image with the outlines" width="1440" height="872" loading="lazy"></div><figcaption>Every region and channel on one screen, with the picture to check it against.</figcaption></figure>
       </div>
       <p class="small compare-note">Both sides use the same synthetic test image. The windows on the left are Fiji's own, captured one by one and arranged for the picture.</p>
     </div>
@@ -634,7 +643,7 @@ footer .fine { display: grid; gap: 8px; }
   var value = document.getElementById("mapValue");
   var unit = document.getElementById("mapUnit");
   var buttons = document.getElementById("legend").querySelectorAll("button");
-  var total = 2703, pinned = null, counting = !still;
+  var total = 2699, pinned = null, counting = !still;
 
   // The middle of the map shows the total, or the region that is pointed at.
   function show(index) {
